@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "X Comment Assistant",
+  "description": "Read X posts and safely copy AI-assisted reply suggestions.",
+  "version": "1.2.0",
+  "action": {
+    "default_title": "X Comment Assistant"
+  },
+  "permissions": ["activeTab", "clipboardWrite", "scripting", "sidePanel", "storage", "tabs"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["assets/contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:3001/*",
+    "http://localhost:3001/*",
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "side_panel": {
+    "default_path": "index.html"
+  }
+}

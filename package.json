@@ -1,0 +1,14 @@
+{
+  "name": "x-comment-assistant",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build:api": "pnpm --filter api build",
+    "build:extension": "pnpm --filter extension build",
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:extension": "pnpm --filter extension dev",
+    "test:api": "pnpm --filter api test -- --runInBand",
+    "lint:api": "pnpm --filter api lint",
+    "typecheck:extension": "pnpm --filter extension typecheck"
+  }
+}
