@@ -3,6 +3,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -144,6 +145,10 @@ export class GenerateFromVisionContextDto {
   @ValidateNested()
   @Type(() => VisionContextPostDto)
   post: VisionContextPostDto;
+
+  @IsOptional()
+  @IsObject()
+  postContext?: Record<string, unknown>;
 
   @ValidateNested()
   @Type(() => VisionContextPayloadDto)

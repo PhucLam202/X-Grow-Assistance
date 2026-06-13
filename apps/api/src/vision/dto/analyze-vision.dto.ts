@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -85,6 +86,10 @@ export class AnalyzeVisionDto {
   @ValidateNested({ each: true })
   @Type(() => VisionMediaDto)
   media: VisionMediaDto[];
+
+  @IsOptional()
+  @IsObject()
+  postContext?: Record<string, unknown>;
 
   @ValidateNested()
   @Type(() => VisionOptionsDto)

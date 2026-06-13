@@ -52,12 +52,20 @@ function hashString(value: string): string {
 export function createVisionContextCacheKey(request: AnalyzeVisionRequest): string {
   const postKey = request.post.url ?? normalizeText(request.post.text);
   const textHash = hashString(normalizeText(request.post.text));
+  const contextFingerprint = request.postContext
+    ? hashString(JSON.stringify({
+        contextType: request.postContext.contextType,
+        quoted: request.postContext.quotedPost?.tweetId ?? request.postContext.quotedPost?.postUrl,
+        reposted: request.postContext.repostedPost?.tweetId ?? request.postContext.repostedPost?.postUrl,
+        parent: request.postContext.parentPost?.tweetId ?? request.postContext.parentPost?.postUrl,
+      }))
+    : 'no-context';
   const mediaFingerprint = request.media
     .map((item) => normalizeMediaUrl(item.url))
     .sort()
     .join(',');
 
-  return ['vision-context', postKey, textHash, mediaFingerprint].join('|');
+  return ['vision-context', postKey, textHash, contextFingerprint, mediaFingerprint].join('|');
 }
 
 export function getCachedVisionContext(key: string): VisionContext | null {

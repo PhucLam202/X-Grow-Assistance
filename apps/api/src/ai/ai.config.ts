@@ -40,10 +40,12 @@ export class AiConfigService {
     legacyEnvName: string,
     defaultProvider: AiProviderName,
   ): AiProviderName {
-    const provider =
+    const providerValue =
       this.configService.get<string>(primaryEnvName) ??
       this.configService.get<string>(legacyEnvName) ??
       defaultProvider;
+
+    const provider = this.normalizeProviderName(providerValue);
 
     if (
       provider === 'openai' ||
@@ -55,6 +57,28 @@ export class AiConfigService {
     }
 
     throw new Error(`Unsupported ${primaryEnvName}: ${provider}`);
+  }
+
+  private normalizeProviderName(value: string): string {
+    const normalized = value.trim().toLowerCase();
+
+    switch (normalized) {
+      case 'deepseek-chat':
+      case 'deepseek-reasoner':
+        return 'deepseek';
+      case 'gpt-4.1-mini':
+      case 'gpt-5-nano':
+      case 'gpt-5-mini':
+        return 'openai';
+      case 'gemini-2.0-flash':
+      case 'gemini-2.5-flash':
+        return 'gemini';
+      case 'claude-3-5-sonnet-latest':
+      case 'claude-3-7-sonnet-latest':
+        return 'claude';
+      default:
+        return normalized;
+    }
   }
 
   getOpenAiConfig(): ProviderConfig {

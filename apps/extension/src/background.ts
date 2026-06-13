@@ -4,6 +4,7 @@ import {
   type CachedPostContext,
   type ExtensionMessage,
   type ExtractedPost,
+  type ExtractedPostContext,
   type SelectedPostResponse,
 } from './shared/types';
 
@@ -36,6 +37,7 @@ type ChromeRuntime = {
 declare const chrome: ChromeRuntime;
 
 let lastSelectedPost: ExtractedPost | undefined;
+let lastSelectedPostContext: ExtractedPostContext | undefined;
 
 const MAX_CONTEXT_CACHE_ITEMS = 200;
 const CONTEXT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -55,7 +57,7 @@ function isCachedPostContext(value: unknown): value is CachedPostContext {
   );
 }
 
-function cachePostContext(post: ExtractedPost): void {
+function cachePostContext(post: ExtractedPost, postContext?: ExtractedPostContext): void {
   const key = createContextCacheKey(post);
   if (!key) return;
 
@@ -68,6 +70,7 @@ function cachePostContext(post: ExtractedPost): void {
     const nextEntry: CachedPostContext = {
       key,
       post,
+      postContext,
       extractedAt: post.detectedAt,
       expiresAt: new Date(now + CONTEXT_CACHE_TTL_MS).toISOString(),
     };
@@ -87,17 +90,18 @@ chrome.runtime?.onInstalled?.addListener(() => {
 chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   if (message.type === 'XCA_SELECTED_POST') {
     lastSelectedPost = message.post;
-    chrome.storage?.local?.set({ [SELECTED_POST_STORAGE_KEY]: message.post });
-    cachePostContext(message.post);
+    lastSelectedPostContext = message.postContext;
+    chrome.storage?.local?.set({ [SELECTED_POST_STORAGE_KEY]: message.postContext ?? message.post });
+    cachePostContext(message.post, message.postContext);
     return;
   }
 
   if (message.type === 'XCA_CACHE_POST_CONTEXT') {
-    cachePostContext(message.post);
+    cachePostContext(message.post, message.postContext);
     return;
   }
 
   if (message.type === 'XCA_GET_SELECTED_POST') {
-    sendResponse({ post: lastSelectedPost });
+    sendResponse({ post: lastSelectedPost, postContext: lastSelectedPostContext });
   }
 });

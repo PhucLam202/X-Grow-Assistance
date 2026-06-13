@@ -37,6 +37,7 @@ export class AiVisionService {
       imageAnalysis: parsed.imageAnalysis,
       combinedContext: parsed.combinedContext,
       suggestions: parsed.suggestions
+        .sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0))
         .slice(0, input.dto.options.maxSuggestions)
         .map((suggestion) => ({
           ...suggestion,
@@ -56,7 +57,7 @@ export class AiVisionService {
 
     const content = await analyzeContext.call(provider, input);
     const parsed = provider.analyzeVisionContext
-      ? this.parser.parseContext(content)
+      ? this.parseVisionContextOrFallback(content)
       : this.parser.parse(content);
 
     return {
@@ -73,5 +74,13 @@ export class AiVisionService {
       imageAnalysis: parsed.imageAnalysis,
       combinedContext: parsed.combinedContext,
     };
+  }
+
+  private parseVisionContextOrFallback(content: string) {
+    try {
+      return this.parser.parseContext(content);
+    } catch {
+      return this.parser.parse(content);
+    }
   }
 }

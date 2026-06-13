@@ -37,12 +37,23 @@ export type CommentNiche = (typeof COMMENT_NICHES)[number];
 export type TargetCommentLanguage = (typeof TARGET_COMMENT_LANGUAGES)[number];
 export type RiskLevel = 'low' | 'medium' | 'high';
 
+export type ReplyCandidateScore = {
+  total: number;
+  postFit: number;
+  visibility: number;
+  specificity: number;
+  native: number;
+  engagementHook: number;
+  whyVisible: string;
+};
+
 export type CommentSuggestion = {
   text: string;
   meaningVi: string;
   tone: string;
   risk: RiskLevel;
   whyItWorks: string;
+  score?: ReplyCandidateScore;
 };
 
 export type ReplyPack = {

@@ -2,7 +2,12 @@
   color: #172033;
   background: #f4f6fb;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -16,7 +21,11 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at top left, rgba(29, 155, 240, 0.18), transparent 32rem),
+    radial-gradient(
+      circle at top left,
+      rgba(29, 155, 240, 0.18),
+      transparent 32rem
+    ),
     #f4f6fb;
 }
 
@@ -121,6 +130,47 @@ select:focus {
   grid-template-columns: 1fr;
   gap: 12px;
   margin-top: 14px;
+}
+
+.languagePicker {
+  position: relative;
+}
+
+.languagePickerButton {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.languagePickerMenu {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #dce3ee;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 14px 38px rgba(43, 58, 84, 0.14);
+}
+
+.languagePickerOption {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #172033;
+  background: #f4f6fb;
+  cursor: pointer;
+  font-weight: 700;
+  text-align: left;
+}
+
+.languagePickerOption:hover {
+  background: #e8f4ff;
 }
 
 .visionPreview,
@@ -262,6 +312,81 @@ button:disabled {
   padding-bottom: 12px;
 }
 
+.feedPanel,
+.postDetectedSummary,
+.decisionCard {
+  display: none !important;
+}
+
+.detectionMetaRow {
+  margin: 8px 0;
+}
+
+.autoDetectBadge {
+  color: #0f5688;
+  background: #dff1ff;
+}
+
+.themeBadge {
+  color: #6d3440;
+  background: #f0e3e7;
+}
+
+.decisionCard {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #d8e2f1;
+  border-left: 5px solid #8da2bd;
+  border-radius: 18px;
+  padding: 14px;
+  background: linear-gradient(135deg, #fbfcff, #f6f9ff);
+}
+
+.decisionCard[data-label="urgent"] {
+  border-left-color: #d12f2f;
+  background: linear-gradient(135deg, #fff7f7, #fbfcff);
+}
+
+.decisionCard[data-label="high"] {
+  border-left-color: #f08a24;
+  background: linear-gradient(135deg, #fff9ef, #fbfcff);
+}
+
+.decisionCard[data-label="medium"] {
+  border-left-color: #1d9bf0;
+}
+
+.decisionCard[data-label="low"] {
+  border-left-color: #7a8aa0;
+}
+
+.decisionCard[data-label="skip"] {
+  border-left-color: #a7b0bf;
+  opacity: 0.88;
+}
+
+.decisionCard[data-label="pending"] {
+  border-left-color: #8da2bd;
+}
+
+.decisionCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.decisionCardHeader .eyebrow,
+.decisionCardHeader h2 {
+  margin-bottom: 2px;
+}
+
+.decisionScore {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
 /* ── Context section typography ── */
 .contextSummary {
   margin: 0 0 6px;
@@ -387,6 +512,61 @@ button:disabled {
   background: #eef2f8;
 }
 
+.replyScoreBadge {
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: #0f5688;
+  background: #dff1ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.replyScorePanel {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #d7e7f8;
+  border-radius: 12px;
+  padding: 10px;
+  background: #f7fbff;
+}
+
+.replyScoreBar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe9f5;
+}
+
+.replyScoreBar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1d9bf0, #49d17d);
+}
+
+.replyScoreGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.replyScoreGrid span {
+  border-radius: 8px;
+  padding: 3px 6px;
+  color: #41516a;
+  background: #eef4fb;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.replyScoreWhy {
+  margin: 0;
+  color: #31435c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 /* ── Comment code block ── */
 .commentBlock {
   margin: 6px 0 0;
@@ -398,7 +578,8 @@ button:disabled {
 .commentBlockText {
   margin: 0;
   padding: 14px 16px 10px;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace;
+  font-family:
+    "JetBrains Mono", "Fira Code", "Cascadia Code", "Menlo", monospace;
   font-size: 14px;
   font-weight: 500;
   line-height: 1.6;
@@ -413,26 +594,28 @@ button:disabled {
   justify-content: flex-end;
   gap: 8px;
   padding: 6px 10px 8px;
-  border-top: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .commentBlockCopyBtn {
-  border: 1px solid rgba(255,255,255,0.18);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 6px;
   padding: 4px 10px;
-  background: rgba(255,255,255,0.08);
+  background: rgba(255, 255, 255, 0.08);
   color: #b8c8e8;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
   letter-spacing: 0.02em;
 }
 
 .commentBlockCopyBtn:hover:not(:disabled) {
-  background: rgba(29,155,240,0.25);
+  background: rgba(29, 155, 240, 0.25);
   color: #ffffff;
-  border-color: rgba(29,155,240,0.5);
+  border-color: rgba(29, 155, 240, 0.5);
 }
 
 .commentBlockCopyBtn:disabled {
@@ -468,7 +651,7 @@ button:disabled {
 }
 
 .meaningText::before {
-  content: 'VI \00B7\00A0';
+  content: "VI \00B7\00A0";
   font-style: normal;
   font-weight: 900;
   color: #1d6fb8;
@@ -515,6 +698,186 @@ button:disabled {
 .historyPanel {
   display: grid;
   gap: 12px;
+}
+
+.feedPanel,
+.feedSummary,
+.feedCandidateList,
+.opportunitySummary,
+.opportunityList {
+  display: grid;
+  gap: 12px;
+}
+
+.opportunityCard {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d8e2f1;
+  border-left: 5px solid #8da2bd;
+  border-radius: 16px;
+  padding: 12px;
+  background: #fbfcff;
+}
+
+.opportunityCard[data-label="urgent"] {
+  border-left-color: #d12f2f;
+}
+
+.opportunityCard[data-label="high"] {
+  border-left-color: #f08a24;
+}
+
+.opportunityCard[data-label="medium"] {
+  border-left-color: #1d9bf0;
+}
+
+.opportunityCard[data-label="low"] {
+  border-left-color: #7a8aa0;
+}
+
+.opportunityCard[data-label="skip"] {
+  border-left-color: #a7b0bf;
+  opacity: 0.82;
+}
+
+.opportunityCard p {
+  margin-bottom: 0;
+  color: #394860;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.opportunityLabel {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.opportunityLabel.urgent,
+.metaBadge.urgent {
+  color: #9d1c1c;
+  background: #ffe1e1;
+}
+
+.opportunityLabel.high,
+.metaBadge.high {
+  color: #8a5200;
+  background: #fff0cb;
+}
+
+.opportunityLabel.medium,
+.metaBadge.medium {
+  color: #0f5688;
+  background: #dff1ff;
+}
+
+.opportunityLabel.low,
+.metaBadge.low {
+  color: #394860;
+  background: #eef2f8;
+}
+
+.opportunityLabel.skip,
+.metaBadge.skip {
+  color: #6d3440;
+  background: #f0e3e7;
+}
+
+.opportunityReasons {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: #394860;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dimensionGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dimensionBadge {
+  border-radius: 8px;
+  padding: 3px 6px;
+  color: #526176;
+  background: #f1f4f9;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.feedStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.feedStatCard {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e1e8f2;
+  border-radius: 14px;
+  padding: 10px;
+  background: #f8fbff;
+}
+
+.feedStatCard span {
+  color: #5d6b82;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.feedStatCard strong {
+  color: #172033;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.feedCandidate {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e1e8f2;
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #fbfcff;
+}
+
+.feedCandidateTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.feedCandidate span {
+  color: #1d6fb8;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.scoreBadge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #0f5688;
+  background: #dff1ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.feedCandidate p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-bottom: 0;
+  color: #394860;
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .historyHeader {

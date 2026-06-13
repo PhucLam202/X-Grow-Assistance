@@ -31,7 +31,6 @@ export class OpenAiProvider implements AiProvider {
       },
       body: JSON.stringify({
         model,
-        temperature: 0.7,
         response_format: { type: 'json_object' },
         messages: [
           {

@@ -30,6 +30,15 @@ http://127.0.0.1:3001/api/v1
 
 Env mặc định nằm ở `apps/api/.env.example`. Copy thành `apps/api/.env` nếu muốn đổi port/host.
 
+Phase 3.2 sẽ dùng MongoDB cho personal memory, nên thêm:
+
+```txt
+MONGODB_URI=mongodb://127.0.0.1:27017/x_comment_assistant
+MONGODB_DB_NAME=x_comment_assistant
+```
+
+Nếu dùng MongoDB Atlas thì `MONGODB_URI` sẽ là connection string dạng `mongodb+srv://...`.
+
 Nếu `3001` bị trùng, đổi `PORT` sang `3002`, `4001`, `5001`,...
 
 ### Build

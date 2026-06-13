@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { CommentSuggestion } from '../../reply-pack/types/reply-pack.types';
+import {
+  CommentSuggestion,
+  ReplyCandidateScore,
+} from '../../reply-pack/types/reply-pack.types';
 import {
   AiVisionContextPayload,
   AiVisionPayload,
@@ -54,6 +57,9 @@ export class VisionAnalysisJsonParser {
       : normalized;
     const parsed = JSON.parse(json) as Partial<AiVisionContextPayload>;
 
+    const imageAnalysis = this.normalizeVisionAnalysis(parsed.imageAnalysis);
+    const combinedContext = this.normalizeCombinedContext(parsed.combinedContext);
+
     if (
       typeof parsed.translation !== 'string' ||
       typeof parsed.summary !== 'string' ||
@@ -62,8 +68,8 @@ export class VisionAnalysisJsonParser {
       typeof parsed.topic !== 'string' ||
       typeof parsed.sentiment !== 'string' ||
       typeof parsed.commentStrategy !== 'string' ||
-      !this.isVisionAnalysis(parsed.imageAnalysis) ||
-      !this.isCombinedContext(parsed.combinedContext)
+      !imageAnalysis ||
+      !combinedContext
     ) {
       throw new Error('AI vision context payload has an invalid shape');
     }
@@ -76,8 +82,8 @@ export class VisionAnalysisJsonParser {
       topic: parsed.topic,
       sentiment: parsed.sentiment,
       commentStrategy: parsed.commentStrategy,
-      imageAnalysis: parsed.imageAnalysis,
-      combinedContext: parsed.combinedContext,
+      imageAnalysis,
+      combinedContext,
     };
   }
 
@@ -95,6 +101,26 @@ export class VisionAnalysisJsonParser {
     );
   }
 
+  private normalizeVisionAnalysis(value: unknown): VisionAnalysis {
+    if (!this.isVisionAnalysis(value)) {
+      return {
+        summary: '',
+        visibleText: '',
+        visualTone: '',
+        importantObjects: [],
+        uncertainty: '',
+      };
+    }
+
+    return {
+      summary: value.summary,
+      visibleText: value.visibleText,
+      visualTone: value.visualTone,
+      importantObjects: value.importantObjects,
+      uncertainty: value.uncertainty ?? '',
+    };
+  }
+
   private isCombinedContext(value: unknown): value is CombinedContext {
     const context = value as Partial<CombinedContext> | undefined;
 
@@ -108,6 +134,21 @@ export class VisionAnalysisJsonParser {
       Array.isArray(context.avoid) &&
       context.avoid.every((item) => typeof item === 'string')
     );
+  }
+
+  private normalizeCombinedContext(value: unknown): CombinedContext {
+    if (!this.isCombinedContext(value)) {
+      return {
+        topic: '',
+        intent: '',
+        sentiment: '',
+        explanation: '',
+        commentStrategy: '',
+        avoid: [],
+      };
+    }
+
+    return value;
   }
 
   private normalizeSuggestion(suggestion: Partial<CommentSuggestion>): CommentSuggestion {
@@ -129,6 +170,72 @@ export class VisionAnalysisJsonParser {
           ? suggestion.risk
           : 'low',
       whyItWorks: suggestion.whyItWorks,
+      score: this.normalizeScore(suggestion.score, suggestion.text, suggestion.whyItWorks),
     };
+  }
+
+  private normalizeScore(
+    score: unknown,
+    text: string,
+    whyItWorks: string,
+  ): ReplyCandidateScore {
+    const fallback = this.fallbackScore(text, whyItWorks);
+    if (!score || typeof score !== 'object') return fallback;
+    const raw = score as Partial<Record<keyof ReplyCandidateScore, unknown>>;
+    const postFit = this.clampScore(raw.postFit, fallback.postFit);
+    const visibility = this.clampScore(raw.visibility, fallback.visibility);
+    const specificity = this.clampScore(raw.specificity, fallback.specificity);
+    const native = this.clampScore(raw.native, fallback.native);
+    const engagementHook = this.clampScore(raw.engagementHook, fallback.engagementHook);
+    const calculatedTotal = this.clampScore(
+      postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+      fallback.total,
+    );
+
+    return {
+      total: this.clampScore(raw.total, calculatedTotal),
+      postFit,
+      visibility,
+      specificity,
+      native,
+      engagementHook,
+      whyVisible:
+        typeof raw.whyVisible === 'string' && raw.whyVisible.trim()
+          ? raw.whyVisible
+          : fallback.whyVisible,
+    };
+  }
+
+  private fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
+    const normalized = text.trim();
+    const length = normalized.length;
+    const hasHook = /\?|😂|🤣|lol|lmao|why|how|this|that/i.test(normalized);
+    const isSpecific = length >= 18 && length <= 180;
+    const generic = /^(nice|great|cool|wow|true|facts)[.!]*$/i.test(normalized);
+    const postFit = generic ? 35 : isSpecific ? 72 : 58;
+    const visibility = generic ? 28 : hasHook ? 74 : 62;
+    const specificity = generic ? 24 : isSpecific ? 76 : 56;
+    const native = length <= 220 ? 78 : 58;
+    const engagementHook = hasHook ? 76 : 58;
+    const total = this.clampScore(
+      postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+      60,
+    );
+
+    return {
+      total,
+      postFit,
+      visibility,
+      specificity,
+      native,
+      engagementHook,
+      whyVisible: whyItWorks || 'Balanced fallback score based on specificity, naturalness, and hook strength.',
+    };
+  }
+
+  private clampScore(value: unknown, fallback: number): number {
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numberValue)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(numberValue)));
   }
 }

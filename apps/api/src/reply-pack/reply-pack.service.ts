@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AiReplyPackService } from '../ai/ai-reply-pack.service';
 import { LanguageDetectorService } from '../common/language/language-detector.service';
 import { GenerateReplyPackDto } from './dto/generate-reply-pack.dto';
+import { buildContextualPostText, getTextForLanguageDetection } from './post-context.builder';
 import { ReplyPack } from './types/reply-pack.types';
 
 @Injectable()
@@ -12,19 +13,20 @@ export class ReplyPackService {
   ) {}
 
   async generate(dto: GenerateReplyPackDto): Promise<ReplyPack> {
-    const detectedLanguage = this.languageDetector.detect(dto.postText);
+    const detectedLanguage = this.languageDetector.detect(
+      getTextForLanguageDetection(dto.postText, dto.postContext),
+    );
     const targetLanguage =
       dto.targetCommentLanguage === 'same_as_original'
         ? detectedLanguage
         : dto.targetCommentLanguage;
 
-    // Derive translationLanguage from targetCommentLanguage.
-    // If the user explicitly chose vi or en for their comment, use that same
-    // language for translations/summaries. Otherwise fall back to the detected
-    // post language (capped to vi | en since those are the only supported
-    // translation languages).
+    // Prefer the explicit analysis language. Otherwise derive the analysis
+    // language from the requested comment language or detected post language.
     const translationLanguage: 'vi' | 'en' =
-      dto.targetCommentLanguage === 'vi'
+      dto.explanationLanguage === 'vi' || dto.explanationLanguage === 'en'
+        ? dto.explanationLanguage
+        : dto.targetCommentLanguage === 'vi'
         ? 'vi'
         : dto.targetCommentLanguage === 'en'
           ? 'en'
@@ -33,7 +35,11 @@ export class ReplyPackService {
             : 'vi';
 
     return this.aiReplyPackService.generateReplyPack({
-      dto: { ...dto, translationLanguage },
+      dto: {
+        ...dto,
+        postText: buildContextualPostText(dto.postText, dto.postContext),
+        translationLanguage,
+      },
       detectedLanguage,
       targetLanguage,
     });

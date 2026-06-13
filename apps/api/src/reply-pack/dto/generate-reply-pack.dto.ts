@@ -1,6 +1,7 @@
 import {
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -28,6 +29,10 @@ export class GenerateReplyPackDto {
   postText: string;
 
   @IsOptional()
+  @IsObject()
+  postContext?: Record<string, unknown>;
+
+  @IsOptional()
   @IsString()
   authorName?: string;
 
@@ -43,6 +48,10 @@ export class GenerateReplyPackDto {
 
   @IsIn(TARGET_COMMENT_LANGUAGES)
   targetCommentLanguage: TargetCommentLanguage;
+
+  @IsOptional()
+  @IsIn(['vi', 'en'])
+  explanationLanguage?: 'vi' | 'en';
 
   @IsIn(COMMENT_TONES)
   tone: CommentTone;

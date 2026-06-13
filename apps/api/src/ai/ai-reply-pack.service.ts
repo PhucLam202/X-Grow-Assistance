@@ -29,6 +29,7 @@ export class AiReplyPackService {
       sentiment: parsed.sentiment,
       commentStrategy: parsed.commentStrategy,
       suggestions: parsed.suggestions
+        .sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0))
         .slice(0, input.dto.maxSuggestions)
         .map((suggestion) => ({
           ...suggestion,

@@ -34,10 +34,20 @@ function normalizeText(text: string): string {
 }
 
 export function createReplyPackCacheKey(request: GenerateReplyPackRequest): string {
+  const contextKey = request.postContext
+    ? [
+        request.postContext.contextType,
+        request.postContext.quotedPost?.tweetId ?? request.postContext.quotedPost?.postUrl,
+        request.postContext.repostedPost?.tweetId ?? request.postContext.repostedPost?.postUrl,
+        request.postContext.parentPost?.tweetId ?? request.postContext.parentPost?.postUrl,
+      ].filter(Boolean).join(':')
+    : 'no_context';
   return [
     request.platform,
     request.postUrl ?? normalizeText(request.postText),
+    contextKey,
     request.targetCommentLanguage,
+    request.explanationLanguage,
     request.tone,
     request.niche,
     request.maxSuggestions,

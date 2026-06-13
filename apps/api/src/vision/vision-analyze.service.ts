@@ -4,6 +4,7 @@ import { AiVisionService } from '../ai/ai-vision.service';
 import { LanguageDetectorService } from '../common/language/language-detector.service';
 import { ImageFetchService } from '../image/image-fetch.service';
 import { GenerateReplyPackDto } from '../reply-pack/dto/generate-reply-pack.dto';
+import { buildContextualPostText, getTextForLanguageDetection } from '../reply-pack/post-context.builder';
 import { ReplyPack } from '../reply-pack/types/reply-pack.types';
 import { AnalyzeVisionDto } from './dto/analyze-vision.dto';
 import { GenerateFromVisionContextDto } from './dto/generate-from-vision-context.dto';
@@ -19,7 +20,10 @@ export class VisionAnalyzeService {
   ) {}
 
   async analyze(dto: AnalyzeVisionDto): Promise<VisionReplyPack> {
-    const detectedLanguage = this.languageDetector.detect(dto.post.text);
+    const contextualDto = this.withContextualPostText(dto);
+    const detectedLanguage = this.languageDetector.detect(
+      getTextForLanguageDetection(dto.post.text, dto.postContext),
+    );
     const targetLanguage =
       dto.options.targetCommentLanguage === 'same_as_original'
         ? detectedLanguage
@@ -42,7 +46,7 @@ export class VisionAnalyzeService {
       );
 
       return this.aiVisionService.analyzeVision({
-        dto,
+        dto: contextualDto,
         images,
         detectedLanguage,
         translationLanguage,
@@ -61,7 +65,10 @@ export class VisionAnalyzeService {
   }
 
   async analyzeContext(dto: AnalyzeVisionDto): Promise<VisionContext> {
-    const detectedLanguage = this.languageDetector.detect(dto.post.text);
+    const contextualDto = this.withContextualPostText(dto);
+    const detectedLanguage = this.languageDetector.detect(
+      getTextForLanguageDetection(dto.post.text, dto.postContext),
+    );
     const targetLanguage =
       dto.options.targetCommentLanguage === 'same_as_original'
         ? detectedLanguage
@@ -84,7 +91,7 @@ export class VisionAnalyzeService {
       );
 
       return this.aiVisionService.analyzeVisionContext({
-        dto,
+        dto: contextualDto,
         images,
         detectedLanguage,
         translationLanguage,
@@ -103,7 +110,9 @@ export class VisionAnalyzeService {
   }
 
   async generateFromContext(dto: GenerateFromVisionContextDto): Promise<VisionReplyPack> {
-    const detectedLanguage = this.languageDetector.detect(dto.post.text);
+    const detectedLanguage = this.languageDetector.detect(
+      getTextForLanguageDetection(dto.post.text, dto.postContext),
+    );
     const targetLanguage =
       dto.options.targetCommentLanguage === 'same_as_original'
         ? detectedLanguage
@@ -145,7 +154,7 @@ export class VisionAnalyzeService {
   ): Promise<ReplyPack> {
     const replyPackDto: GenerateReplyPackDto & { translationLanguage: 'vi' | 'en' } = {
       platform: dto.post.platform,
-      postText: dto.post.text,
+      postText: buildContextualPostText(dto.post.text, dto.postContext),
       authorName: dto.post.authorName,
       authorHandle: dto.post.authorHandle,
       postUrl: dto.post.url,
@@ -213,10 +222,13 @@ export class VisionAnalyzeService {
 
   private buildPostTextWithVisionContext(dto: GenerateFromVisionContextDto): string {
     const imageAnalysis = dto.visionContext.imageAnalysis;
+    const structuredPostContext = buildContextualPostText(dto.post.text, dto.postContext);
     return [
-      dto.post.text,
+      structuredPostContext,
       '',
-      'Cached visual context for this same X post and selected images:',
+      'Cached visual context for selected images:',
+      '- Treat visual analysis as supporting evidence, not the sole context.',
+      '- If the image belongs to a quoted/reposted/old post, use it as background only.',
       `- Post summary: ${dto.visionContext.summary}`,
       `- Visual summary: ${imageAnalysis?.summary ?? 'No image summary available.'}`,
       `- Visible text/OCR: ${imageAnalysis?.visibleText ?? 'None'}`,
@@ -239,5 +251,15 @@ export class VisionAnalyzeService {
     }
 
     return detectedLanguage === 'en' ? 'en' : 'vi';
+  }
+
+  private withContextualPostText(dto: AnalyzeVisionDto): AnalyzeVisionDto {
+    return {
+      ...dto,
+      post: {
+        ...dto.post,
+        text: buildContextualPostText(dto.post.text, dto.postContext),
+      },
+    };
   }
 }
