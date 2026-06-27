@@ -5,6 +5,7 @@ import { ClaudeProvider } from './providers/claude.provider';
 import { DeepSeekProvider } from './providers/deepseek.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { OpenAiProvider } from './providers/openai.provider';
+import { OpenRouterProvider } from './providers/openrouter.provider';
 
 @Injectable()
 export class AiProviderRegistry {
@@ -15,9 +16,10 @@ export class AiProviderRegistry {
     deepSeekProvider: DeepSeekProvider,
     geminiProvider: GeminiProvider,
     claudeProvider: ClaudeProvider,
+    openRouterProvider: OpenRouterProvider,
   ) {
     this.providers = new Map(
-      [openAiProvider, deepSeekProvider, geminiProvider, claudeProvider].map(
+      [openAiProvider, deepSeekProvider, geminiProvider, claudeProvider, openRouterProvider].map(
         (provider) => [provider.name, provider],
       ),
     );

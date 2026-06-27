@@ -39,15 +39,20 @@ function describePost(label: string, post: PostRecord | undefined): string[] {
     `- Tweet ID: ${post.tweetId ?? ''}`,
     `- Text: ${post.text ?? ''}`,
     `- Media count: ${mediaCount}`,
-    ...((post.media ?? []).map((media, index) => {
-      const type = toStringValue(media.type) ?? toStringValue(media.mediaType) ?? 'media';
-      const url = toStringValue(media.url) ?? toStringValue(media.mediaUrl) ?? '';
+    ...(post.media ?? []).map((media, index) => {
+      const type =
+        toStringValue(media.type) ?? toStringValue(media.mediaType) ?? 'media';
+      const url =
+        toStringValue(media.url) ?? toStringValue(media.mediaUrl) ?? '';
       return `  - ${type} ${index + 1}: ${url}`;
-    })),
+    }),
   ];
 }
 
-export function buildContextualPostText(postText: string, postContext?: Record<string, unknown>): string {
+export function buildContextualPostText(
+  postText: string,
+  postContext?: Record<string, unknown>,
+): string {
   if (!postContext) return postText;
 
   const contextType = toStringValue(postContext.contextType) ?? 'unknown';
@@ -55,10 +60,16 @@ export function buildContextualPostText(postText: string, postContext?: Record<s
   const quotedPost = toPostRecord(postContext.quotedPost);
   const repostedPost = toPostRecord(postContext.repostedPost);
   const parentPost = toPostRecord(postContext.parentPost);
-  const socialContext = isRecord(postContext.socialContext) ? postContext.socialContext : undefined;
-  const extraction = isRecord(postContext.extraction) ? postContext.extraction : undefined;
+  const socialContext = isRecord(postContext.socialContext)
+    ? postContext.socialContext
+    : undefined;
+  const extraction = isRecord(postContext.extraction)
+    ? postContext.extraction
+    : undefined;
   const warnings = Array.isArray(extraction?.warnings)
-    ? extraction.warnings.filter((item): item is string => typeof item === 'string')
+    ? extraction.warnings.filter(
+        (item): item is string => typeof item === 'string',
+      )
     : [];
 
   return [
@@ -68,11 +79,17 @@ export function buildContextualPostText(postText: string, postContext?: Record<s
     `Self-repost/callback: ${socialContext?.isSelfRepost === true ? 'yes' : 'no or unknown'}`,
     `Extraction warnings: ${warnings.length > 0 ? warnings.join(', ') : 'none'}`,
     '',
-    ...describePost('MAIN POST - this is the primary comment target', mainPost ?? { text: postText }),
+    ...describePost(
+      'MAIN POST - this is the primary comment target',
+      mainPost ?? { text: postText },
+    ),
     '',
     ...describePost('QUOTED POST - background context only', quotedPost),
     ...(quotedPost ? [''] : []),
-    ...describePost('REPOSTED / ORIGINAL POST - background context only', repostedPost),
+    ...describePost(
+      'REPOSTED / ORIGINAL POST - background context only',
+      repostedPost,
+    ),
     ...(repostedPost ? [''] : []),
     ...describePost('PARENT POST - conversation background only', parentPost),
     ...(parentPost ? [''] : []),
@@ -87,7 +104,10 @@ export function buildContextualPostText(postText: string, postContext?: Record<s
   ].join('\n');
 }
 
-export function getTextForLanguageDetection(postText: string, postContext?: Record<string, unknown>): string {
+export function getTextForLanguageDetection(
+  postText: string,
+  postContext?: Record<string, unknown>,
+): string {
   const mainPost = toPostRecord(postContext?.mainPost);
   return mainPost?.text ?? postText;
 }

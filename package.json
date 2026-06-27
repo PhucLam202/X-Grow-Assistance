@@ -9,6 +9,9 @@
     "dev:extension": "pnpm --filter extension dev",
     "test:api": "pnpm --filter api test -- --runInBand",
     "lint:api": "pnpm --filter api lint",
-    "typecheck:extension": "pnpm --filter extension typecheck"
+    "typecheck:extension": "pnpm --filter extension typecheck",
+    "dev:dashboard": "pnpm --filter dashboard dev",
+    "build:dashboard": "pnpm --filter dashboard build",
+    "typecheck:dashboard": "pnpm --filter dashboard typecheck"
   }
 }

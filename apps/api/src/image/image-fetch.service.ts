@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ImageFetchInput, NormalizedImage } from './image.types';
 
-const SUPPORTED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+const SUPPORTED_CONTENT_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+] as const;
 const DEFAULT_ALLOWED_HOSTS = [
   'pbs.twimg.com',
   'abs.twimg.com',
@@ -38,7 +42,9 @@ export class ImageFetchService {
       const contentType = this.normalizeContentType(
         response.headers.get('content-type'),
       );
-      const contentLength = Number(response.headers.get('content-length') ?? '0');
+      const contentLength = Number(
+        response.headers.get('content-length') ?? '0',
+      );
 
       if (contentLength > maxSizeBytes) {
         throw new Error('Image is larger than the allowed limit');
@@ -110,14 +116,20 @@ export class ImageFetchService {
     return url;
   }
 
-  private normalizeContentType(contentTypeHeader: string | null): NormalizedImage['contentType'] {
+  private normalizeContentType(
+    contentTypeHeader: string | null,
+  ): NormalizedImage['contentType'] {
     const contentType = contentTypeHeader?.split(';')[0]?.trim().toLowerCase();
 
-    if (SUPPORTED_CONTENT_TYPES.some((supported) => supported === contentType)) {
+    if (
+      SUPPORTED_CONTENT_TYPES.some((supported) => supported === contentType)
+    ) {
       return contentType as NormalizedImage['contentType'];
     }
 
-    throw new Error(`Unsupported image content type: ${contentType ?? 'unknown'}`);
+    throw new Error(
+      `Unsupported image content type: ${contentType ?? 'unknown'}`,
+    );
   }
 
   private getAllowedHosts(): string[] {
@@ -131,10 +143,14 @@ export class ImageFetchService {
   }
 
   private getMaxSizeBytes(): number {
-    return Number(this.configService.get<string>('IMAGE_MAX_SIZE_BYTES', '5242880'));
+    return Number(
+      this.configService.get<string>('IMAGE_MAX_SIZE_BYTES', '5242880'),
+    );
   }
 
   private getTimeoutMs(): number {
-    return Number(this.configService.get<string>('IMAGE_FETCH_TIMEOUT_MS', '8000'));
+    return Number(
+      this.configService.get<string>('IMAGE_FETCH_TIMEOUT_MS', '8000'),
+    );
   }
 }

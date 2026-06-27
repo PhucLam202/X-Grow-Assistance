@@ -467,7 +467,8 @@ OUTPUT FORMAT (strict JSON, no extra text)
    * Used when generating comment suggestions with full image and tone awareness.
    */
   build(input: AiVisionInput): string {
-    const { dto, detectedLanguage, targetLanguage, translationLanguage } = input;
+    const { dto, detectedLanguage, targetLanguage, translationLanguage } =
+      input;
 
     const toneInstruction = getToneInstruction(dto.options.tone);
     const nicheInstruction = getNicheInstruction(dto.options.niche);

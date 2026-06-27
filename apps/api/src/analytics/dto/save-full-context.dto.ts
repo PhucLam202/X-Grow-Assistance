@@ -1,4 +1,14 @@
-import { IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class SaveFullContextDto {
   @IsOptional()
@@ -21,8 +31,21 @@ export class SaveFullContextDto {
   @MaxLength(120)
   tweetId?: string;
 
-  @IsIn(['original_post', 'reply', 'quote_post', 'repost', 'thread_post', 'unknown'])
-  postType!: 'original_post' | 'reply' | 'quote_post' | 'repost' | 'thread_post' | 'unknown';
+  @IsIn([
+    'original_post',
+    'reply',
+    'quote_post',
+    'repost',
+    'thread_post',
+    'unknown',
+  ])
+  postType!:
+    | 'original_post'
+    | 'reply'
+    | 'quote_post'
+    | 'repost'
+    | 'thread_post'
+    | 'unknown';
 
   @IsOptional()
   @IsString()

@@ -7,10 +7,6 @@ import { TopOpportunitiesSelector } from './selectors/top-opportunities.selector
 @Module({
   imports: [FeedIntelligenceModule],
   controllers: [OpportunityController],
-  providers: [
-    OpportunityService,
-    TopOpportunitiesSelector,
-  ],
+  providers: [OpportunityService, TopOpportunitiesSelector],
 })
 export class OpportunityModule {}
-

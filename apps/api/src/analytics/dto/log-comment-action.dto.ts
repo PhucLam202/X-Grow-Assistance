@@ -1,4 +1,10 @@
-import { IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsObject,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class LogCommentActionDto {
   @IsOptional()
@@ -15,7 +21,18 @@ export class LogCommentActionDto {
   @MaxLength(120)
   suggestionId?: string;
 
-  @IsIn(['generated', 'copied', 'inserted', 'edited', 'sent_manually', 'sent_detected', 'mark_as_sent', 'skipped', 'saved', 'regenerated'])
+  @IsIn([
+    'generated',
+    'copied',
+    'inserted',
+    'edited',
+    'sent_manually',
+    'sent_detected',
+    'mark_as_sent',
+    'skipped',
+    'saved',
+    'regenerated',
+  ])
   actionType!:
     | 'generated'
     | 'copied'

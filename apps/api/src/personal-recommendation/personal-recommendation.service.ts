@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Db, ObjectId } from 'mongodb';
 import { MongoService } from '../mongo/mongo.service';
 import { IngestActionLogDto } from './dto/ingest-action-log.dto';
@@ -18,7 +18,7 @@ export class PersonalRecommendationService {
   constructor(private readonly mongoService: MongoService) {}
 
   async ingestActionLog(dto: IngestActionLogDto) {
-    const userId = dto.userId ?? 'local-user';
+    const userId = this.requireUserId(dto.userId);
     const db = await this.mongoService.db();
     const personalEventId = new ObjectId();
 
@@ -51,7 +51,7 @@ export class PersonalRecommendationService {
   }
 
   async manualPerformanceUpdate(dto: ManualPerformanceUpdateDto) {
-    const userId = dto.userId ?? 'local-user';
+    const userId = this.requireUserId(dto.userId);
     const db = await this.mongoService.db();
     const scores = this.calculateScores(dto.metrics);
     const performanceId = new ObjectId();
@@ -107,21 +107,32 @@ export class PersonalRecommendationService {
       matchQuery.$or = orConditions;
     }
 
-    const matchedEvent = await db.collection('personal_events').findOneAndUpdate(
-      matchQuery,
-      {
-        $set: {
-          status: 'performance_recorded',
-          performanceId,
-          updatedAt: now,
+    const matchedEvent = await db
+      .collection('personal_events')
+      .findOneAndUpdate(
+        matchQuery,
+        {
+          $set: {
+            status: 'performance_recorded',
+            performanceId,
+            updatedAt: now,
+          },
         },
-      },
-      { sort: { createdAt: -1 } },
-    );
+        { sort: { createdAt: -1 } },
+      );
 
     const signalUpdates = this.buildSignalUpdates(dto, scores);
     for (const update of signalUpdates) {
-      await this.upsertSignalScore(db, userId, update.type, update.key, scores.finalPerformanceScore, dto.metrics, performanceId, update.metadata);
+      await this.upsertSignalScore(
+        db,
+        userId,
+        update.type,
+        update.key,
+        scores.finalPerformanceScore,
+        dto.metrics,
+        performanceId,
+        update.metadata,
+      );
     }
 
     await this.refreshProfile(db, userId);
@@ -130,29 +141,52 @@ export class PersonalRecommendationService {
       success: true,
       performanceId,
       matchedEventId: matchedEvent?.value?._id ?? null,
-      updatedSignals: signalUpdates.map((signal) => `${signal.type}:${signal.key}`),
+      updatedSignals: signalUpdates.map(
+        (signal) => `${signal.type}:${signal.key}`,
+      ),
       scores,
     };
   }
 
-  async getPersonalProfile(userId = 'local-user') {
+  async getPersonalProfile(userId: string) {
     const db = await this.mongoService.db();
-    const profile = await db.collection('personal_profiles').findOne({ userId });
+    const profile = await db
+      .collection('personal_profiles')
+      .findOne({ userId });
 
-    if (profile) {
-      return profile;
+    const isEmpty =
+      !profile ||
+      ((profile.targetNiches as unknown[])?.length === 0 &&
+        (profile.preferredLanguages as unknown[])?.length === 0 &&
+        (profile.accountWatchlist as unknown[])?.length === 0);
+
+    if (isEmpty) {
+      await this.refreshProfile(db, userId);
     }
 
-    await this.refreshProfile(db, userId);
-    return db.collection('personal_profiles').findOne({ userId });
+    const [refreshed, memory] = await Promise.all([
+      db.collection('personal_profiles').findOne({ userId }),
+      db.collection('comment_memory_profiles').findOne({ userId }),
+    ]);
+
+    return { ...refreshed, commentMemory: memory ?? null };
   }
 
-  async rebuildCommentMemory(userId = 'local-user') {
+  async rebuildCommentMemory(userId: string) {
     const db = await this.mongoService.db();
-    const usedComments = await db.collection('used_comment_memories').find({ userId }).toArray();
-    const preferredLanguages = this.topValues(usedComments.map((item) => item.language));
-    const preferredTones = this.topValues(usedComments.map((item) => item.tone));
-    const commonPostTypes = this.topValues(usedComments.map((item) => item.postType));
+    const usedComments = await db
+      .collection('used_comment_memories')
+      .find({ userId })
+      .toArray();
+    const preferredLanguages = this.topValues(
+      usedComments.map((item) => item.language),
+    );
+    const preferredTones = this.topValues(
+      usedComments.map((item) => item.tone),
+    );
+    const commonPostTypes = this.topValues(
+      usedComments.map((item) => item.postType),
+    );
     const now = new Date();
 
     await db.collection('comment_memory_profiles').updateOne(
@@ -164,7 +198,10 @@ export class PersonalRecommendationService {
           preferredTones,
           commonPostTypes,
           blockedPhrases: ['Great post', 'Thanks for sharing'],
-          styleNotes: this.buildCommentStyleNotes(preferredLanguages, preferredTones),
+          styleNotes: this.buildCommentStyleNotes(
+            preferredLanguages,
+            preferredTones,
+          ),
           updatedAt: now,
         },
         $setOnInsert: { createdAt: now },
@@ -183,16 +220,27 @@ export class PersonalRecommendationService {
     };
   }
 
-  async getCommentMemory(userId = 'local-user') {
+  async getCommentMemory(userId: string) {
     const db = await this.mongoService.db();
-    const profile = await db.collection('comment_memory_profiles').findOne({ userId });
+    let profile = await db
+      .collection('comment_memory_profiles')
+      .findOne({ userId });
+    if (!profile) {
+      await this.rebuildCommentMemory(userId);
+      profile = await db.collection('comment_memory_profiles').findOne({ userId });
+    }
     const recentUsedComments = await db
       .collection('used_comment_memories')
       .find({ userId })
       .sort({ createdAt: -1 })
       .limit(20)
       .toArray();
-    const patterns = await db.collection('comment_pattern_memories').find({ userId }).sort({ useCount: -1 }).limit(10).toArray();
+    const patterns = await db
+      .collection('comment_pattern_memories')
+      .find({ userId })
+      .sort({ useCount: -1 })
+      .limit(10)
+      .toArray();
 
     return {
       userId,
@@ -202,7 +250,7 @@ export class PersonalRecommendationService {
     };
   }
 
-  async checkCommentSimilarity(commentText: string, userId = 'local-user') {
+  async checkCommentSimilarity(commentText: string, userId: string) {
     const db = await this.mongoService.db();
     const normalized = this.normalizePattern(commentText);
     const recent = await db
@@ -212,7 +260,11 @@ export class PersonalRecommendationService {
       .limit(50)
       .toArray();
 
-    const exact = recent.find((item) => item.normalizedText === normalized || item.similarityKey === normalized.slice(0, 120));
+    const exact = recent.find(
+      (item) =>
+        item.normalizedText === normalized ||
+        item.similarityKey === normalized.slice(0, 120),
+    );
     if (exact) {
       return {
         isTooSimilar: true,
@@ -224,9 +276,13 @@ export class PersonalRecommendationService {
 
     const tokenSet = new Set(normalized.split(' ').filter(Boolean));
     const similar = recent.find((item) => {
-      const candidateTokens = String(item.normalizedText ?? '').split(' ').filter(Boolean);
+      const candidateTokens = String(item.normalizedText ?? '')
+        .split(' ')
+        .filter(Boolean);
       if (candidateTokens.length === 0 || tokenSet.size === 0) return false;
-      const overlap = candidateTokens.filter((token) => tokenSet.has(token)).length;
+      const overlap = candidateTokens.filter((token) =>
+        tokenSet.has(token),
+      ).length;
       return overlap / Math.max(candidateTokens.length, tokenSet.size) >= 0.75;
     });
 
@@ -234,11 +290,15 @@ export class PersonalRecommendationService {
       isTooSimilar: Boolean(similar),
       similarCommentId: similar ? String(similar._id) : null,
       similarText: similar?.text ?? null,
-      reason: similar ? 'Comment structure is too close to a recent used comment.' : null,
+      reason: similar
+        ? 'Comment structure is too close to a recent used comment.'
+        : null,
     };
   }
 
-  private calculateScores(metrics: ManualPerformanceUpdateDto['metrics']): PerformanceScores {
+  private calculateScores(
+    metrics: ManualPerformanceUpdateDto['metrics'],
+  ): PerformanceScores {
     const likes = metrics.likes ?? 0;
     const replies = metrics.replies ?? 0;
     const reposts = metrics.reposts ?? 0;
@@ -247,7 +307,13 @@ export class PersonalRecommendationService {
 
     const absolutePerformanceScore = Math.min(
       100,
-      Math.round(likes * 2 + replies * 8 + reposts * 12 + profileVisits * 15 + views / 200),
+      Math.round(
+        likes * 2 +
+          replies * 8 +
+          reposts * 12 +
+          profileVisits * 15 +
+          views / 200,
+      ),
     );
 
     const postLikes = metrics.postLikes ?? 0;
@@ -255,7 +321,10 @@ export class PersonalRecommendationService {
     const postReposts = metrics.postReposts ?? 0;
 
     const hasRelativeSignal =
-      postLikes > 0 || postReplies > 0 || postReposts > 0 || (metrics.postViews ?? 0) > 0;
+      postLikes > 0 ||
+      postReplies > 0 ||
+      postReposts > 0 ||
+      (metrics.postViews ?? 0) > 0;
 
     if (!hasRelativeSignal) {
       return {
@@ -266,14 +335,19 @@ export class PersonalRecommendationService {
     }
 
     const commentEngagement = likes + replies * 4 + reposts * 6;
-    const postEngagement = Math.max(postLikes + postReplies * 2 + postReposts * 3, 1);
+    const postEngagement = Math.max(
+      postLikes + postReplies * 2 + postReposts * 3,
+      1,
+    );
     const relativePerformanceScore = Math.min(
       100,
       Math.round((commentEngagement / postEngagement) * 100),
     );
     const finalPerformanceScore = Math.min(
       100,
-      Math.round(absolutePerformanceScore * 0.7 + relativePerformanceScore * 0.3),
+      Math.round(
+        absolutePerformanceScore * 0.7 + relativePerformanceScore * 0.3,
+      ),
     );
 
     return {
@@ -284,8 +358,15 @@ export class PersonalRecommendationService {
     };
   }
 
-  private buildSignalUpdates(dto: ManualPerformanceUpdateDto, scores: PerformanceScores) {
-    const updates: Array<{ type: SignalType; key: string; metadata?: Record<string, unknown> }> = [];
+  private buildSignalUpdates(
+    dto: ManualPerformanceUpdateDto,
+    scores: PerformanceScores,
+  ) {
+    const updates: Array<{
+      type: SignalType;
+      key: string;
+      metadata?: Record<string, unknown>;
+    }> = [];
 
     if (dto.niche) {
       updates.push({ type: 'niche', key: dto.niche });
@@ -300,11 +381,18 @@ export class PersonalRecommendationService {
     }
 
     if (dto.actionId) {
-      updates.push({ type: 'comment_pattern', key: `action:${dto.actionId}`, metadata: { actionId: dto.actionId } });
+      updates.push({
+        type: 'comment_pattern',
+        key: `action:${dto.actionId}`,
+        metadata: { actionId: dto.actionId },
+      });
     }
 
     if (scores.finalPerformanceScore >= 60 && dto.commentText) {
-      updates.push({ type: 'comment_pattern', key: this.normalizePattern(dto.commentText) });
+      updates.push({
+        type: 'comment_pattern',
+        key: this.normalizePattern(dto.commentText),
+      });
     }
 
     return updates;
@@ -323,12 +411,26 @@ export class PersonalRecommendationService {
     const collection = db.collection('personal_signal_scores');
     const current = await collection.findOne({ userId, signalType, signalKey });
     const sampleCount = (current?.sampleCount ?? 0) + 1;
-    const positiveCount = (current?.positiveCount ?? 0) + (finalPerformanceScore >= 60 ? 1 : 0);
-    const negativeCount = (current?.negativeCount ?? 0) + (finalPerformanceScore < 40 ? 1 : 0);
+    const positiveCount =
+      (current?.positiveCount ?? 0) + (finalPerformanceScore >= 60 ? 1 : 0);
+    const negativeCount =
+      (current?.negativeCount ?? 0) + (finalPerformanceScore < 40 ? 1 : 0);
 
-    const avgLikes = this.weightedAverage(current?.avgLikes, sampleCount, metrics.likes ?? 0);
-    const avgReplies = this.weightedAverage(current?.avgReplies, sampleCount, metrics.replies ?? 0);
-    const avgViews = this.weightedAverage(current?.avgViews, sampleCount, metrics.views ?? 0);
+    const avgLikes = this.weightedAverage(
+      current?.avgLikes,
+      sampleCount,
+      metrics.likes ?? 0,
+    );
+    const avgReplies = this.weightedAverage(
+      current?.avgReplies,
+      sampleCount,
+      metrics.replies ?? 0,
+    );
+    const avgViews = this.weightedAverage(
+      current?.avgViews,
+      sampleCount,
+      metrics.views ?? 0,
+    );
     const avgFinalPerformanceScore = this.weightedAverage(
       current?.avgFinalPerformanceScore,
       sampleCount,
@@ -364,25 +466,60 @@ export class PersonalRecommendationService {
   }
 
   private async refreshProfile(db: Db, userId: string) {
-    const signals = await db.collection('personal_signal_scores').find({ userId }).toArray();
+    type SignalLike = { signalType: string; signalKey: string; score: number };
+    const signals: SignalLike[] = (await db
+      .collection('personal_signal_scores')
+      .find({ userId })
+      .toArray()) as unknown as SignalLike[];
+
+    // ponytail: no perf data yet → derive basic signals from usage history
+    if (signals.length === 0) {
+      const [memories, events] = await Promise.all([
+        db.collection('used_comment_memories').find({ userId }).limit(200).toArray(),
+        db.collection('personal_events').find({ userId }).limit(200).toArray(),
+      ]);
+      const freqToSignals = (type: string, vals: unknown[]) => {
+        const counts = new Map<string, number>();
+        for (const v of vals) {
+          if (v && typeof v === 'string') counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+        const total = counts.size ? Math.max(...counts.values()) : 1;
+        return [...counts.entries()].map(([key, count]) => ({
+          signalType: type,
+          signalKey: key,
+          score: Math.min(100, Math.round((count / total) * 80)),
+        }));
+      };
+      (signals as SignalLike[]).push(
+        ...freqToSignals('language', memories.map((m) => m.language)),
+        ...freqToSignals('tone', memories.map((m) => m.tone)),
+        ...freqToSignals('niche', events.map((e) => e.niche)),
+        ...freqToSignals('account', events.map((e) => e.username)),
+      );
+    }
 
     const byType = (signalType: SignalType) =>
       signals
         .filter((signal) => signal.signalType === signalType)
         .sort((left, right) => right.score - left.score);
 
-    const topAccounts = byType('account').slice(0, 5).map((signal) => ({
-      username: signal.signalKey,
-      priority: signal.score >= 80 ? 'high' : signal.score >= 60 ? 'medium' : 'low',
-      successScore: signal.score,
-    }));
+    const topAccounts = byType('account')
+      .slice(0, 5)
+      .map((signal) => ({
+        username: signal.signalKey,
+        priority:
+          signal.score >= 80 ? 'high' : signal.score >= 60 ? 'medium' : 'low',
+        successScore: signal.score,
+      }));
 
     await db.collection('personal_profiles').updateOne(
       { userId },
       {
         $set: {
           userId,
-          targetNiches: byType('niche').slice(0, 5).map((signal) => signal.signalKey),
+          targetNiches: byType('niche')
+            .slice(0, 5)
+            .map((signal) => signal.signalKey),
           strongNiches: byType('niche')
             .filter((signal) => signal.score >= 60)
             .slice(0, 5)
@@ -391,12 +528,16 @@ export class PersonalRecommendationService {
             .filter((signal) => signal.score < 40)
             .slice(0, 5)
             .map((signal) => signal.signalKey),
-          preferredLanguages: byType('language').slice(0, 5).map((signal) => signal.signalKey),
+          preferredLanguages: byType('language')
+            .slice(0, 5)
+            .map((signal) => signal.signalKey),
           bestLanguages: byType('language')
             .filter((signal) => signal.score >= 60)
             .slice(0, 5)
             .map((signal) => signal.signalKey),
-          tonePreferences: byType('tone').slice(0, 5).map((signal) => signal.signalKey),
+          tonePreferences: byType('tone')
+            .slice(0, 5)
+            .map((signal) => signal.signalKey),
           successfulTones: byType('tone')
             .filter((signal) => signal.score >= 60)
             .slice(0, 5)
@@ -409,15 +550,23 @@ export class PersonalRecommendationService {
     );
   }
 
-  private weightedAverage(previous: number | undefined, sampleCount: number, currentValue: number) {
+  private weightedAverage(
+    previous: number | undefined,
+    sampleCount: number,
+    currentValue: number,
+  ) {
     if (previous === undefined || sampleCount <= 1) {
       return currentValue;
     }
 
-    return Math.round(((previous * (sampleCount - 1)) + currentValue) / sampleCount);
+    return Math.round(
+      (previous * (sampleCount - 1) + currentValue) / sampleCount,
+    );
   }
 
-  private toLabel(score: number): 'weak' | 'okay' | 'good' | 'strong' | 'excellent' {
+  private toLabel(
+    score: number,
+  ): 'weak' | 'okay' | 'good' | 'strong' | 'excellent' {
     if (score >= 80) return 'excellent';
     if (score >= 60) return 'strong';
     if (score >= 40) return 'good';
@@ -428,6 +577,13 @@ export class PersonalRecommendationService {
   private normalizePattern(commentText: string) {
     const compact = commentText.trim().toLowerCase().replace(/\s+/g, ' ');
     return compact.slice(0, 80);
+  }
+
+  private requireUserId(userId?: string): string {
+    if (!userId) {
+      throw new BadRequestException('Authenticated userId is required');
+    }
+    return userId;
   }
 
   private topValues(values: unknown[]): string[] {
@@ -443,20 +599,35 @@ export class PersonalRecommendationService {
   }
 
   private buildCommentStyleNotes(languages: string[], tones: string[]): string {
-    if (languages.length === 0 && tones.length === 0) return 'Not enough used comment data yet.';
+    if (languages.length === 0 && tones.length === 0)
+      return 'Not enough used comment data yet.';
     return `User often chooses ${tones.join(', ') || 'mixed-tone'} comments in ${languages.join(', ') || 'mixed languages'}.`;
   }
 
-  private async rebuildPatternMemories(db: Db, userId: string, usedComments: Array<Record<string, unknown>>) {
-    const groups = new Map<string, { language?: string; tone?: string; examples: string[]; useCount: number }>();
+  private async rebuildPatternMemories(
+    db: Db,
+    userId: string,
+    usedComments: Array<Record<string, unknown>>,
+  ) {
+    const groups = new Map<
+      string,
+      { language?: string; tone?: string; examples: string[]; useCount: number }
+    >();
 
     for (const item of usedComments) {
-      const language = typeof item.language === 'string' ? item.language : 'unknown';
+      const language =
+        typeof item.language === 'string' ? item.language : 'unknown';
       const tone = typeof item.tone === 'string' ? item.tone : 'unknown';
       const key = `${language}:${tone}`;
-      const group = groups.get(key) ?? { language, tone, examples: [], useCount: 0 };
+      const group = groups.get(key) ?? {
+        language,
+        tone,
+        examples: [],
+        useCount: 0,
+      };
       group.useCount += 1;
-      if (typeof item.text === 'string' && group.examples.length < 5) group.examples.push(item.text);
+      if (typeof item.text === 'string' && group.examples.length < 5)
+        group.examples.push(item.text);
       groups.set(key, group);
     }
 

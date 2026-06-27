@@ -2,39 +2,28 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   analyzeVisionContext,
-  generateFromVisionContext,
-  generateReplyPack,
+  getCommentHistory,
+  getMe,
   logCommentAction,
+  login,
+  register,
+  logout,
+  runCommentHarness,
   scoreFeedSnapshot,
-  scorePost,
   saveFullContext,
   submitFeedSnapshot,
   trackUsageEvent,
 } from "../shared/apiClient";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { DEFAULT_MAX_SUGGESTIONS, X_OAUTH_AUTHORIZE_URL } from "../shared/config";
 import { getDeviceId } from "../shared/deviceId";
-import {
-  addHistoryItem,
-  clearHistoryItems,
-  getHistoryItems,
-} from "../shared/history";
-import {
-  createReplyPackCacheKey,
-  getCachedReplyPack,
-  setCachedReplyPack,
-} from "../shared/replyPackCache";
+import { getAuthSession, setAuthSession, type AuthSession } from "../shared/auth";
 import { SELECTED_POST_STORAGE_KEY } from "../shared/types";
-import { UI_LANGUAGE_STORAGE_KEY, i18n, type UiLanguage } from "../i18n";
-import {
-  createVisionContextCacheKey,
-  deleteCachedVisionContext,
-  getCachedVisionContext,
-  setCachedVisionContext,
-} from "../shared/visionContextCache";
 import { scoreOpportunity } from "../../../../packages/opportunity-scoring/src/index";
 import type {
   AnalyzeVisionRequest,
   CommentFeedback,
+  CommentHistoryItem,
   CommentSuggestion,
   CommentTone,
   ExplanationLanguage,
@@ -45,7 +34,10 @@ import type {
   FeedScanResponse,
   FeedSnapshotSubmitResponse,
   GenerateReplyPackRequest,
-  HistoryItem,
+  HarnessDriverInput,
+  HarnessGeneratedComment,
+  HarnessPostSegment,
+  HarnessState,
   OpportunityPostScoreResponse,
   OpportunitySnapshotScoreResponse,
   OpportunityLabel,
@@ -56,6 +48,7 @@ import type {
   SelectedPostResponse,
   TargetCommentLanguage,
   UsageEventName,
+  VisionContext,
   VisionReplyPack,
 } from "../shared/types";
 
@@ -133,7 +126,13 @@ type CopyState =
 type PersistedGeneration = Pick<
   SaveFullContextResponse,
   "postId" | "analysisId" | "suggestionIds"
->;
+> & {
+  postUrl?: string;
+  tweetId?: string;
+};
+
+type AuthMode = "login" | "create";
+type AuthMessageType = "info" | "success" | "error";
 
 function getCopyLabel(state: CopyState): string {
   if (state.status === "copying") return "Copying...";
@@ -236,11 +235,6 @@ function buildPostScoreCandidate(post: ExtractedPost) {
   };
 }
 
-function buildPostScoreRequest(post: ExtractedPost) {
-  return {
-    candidate: buildPostScoreCandidate(post),
-  };
-}
 
 function pushPostOverlayToCurrentTab(
   post: ExtractedPost,
@@ -262,6 +256,10 @@ function pushPostOverlayToCurrentTab(
 }
 
 const defaultPostText = "これはかなり面白いですね";
+const DEFAULT_ANALYSIS_MODE: AnalysisMode = "text";
+const DEFAULT_COMMENT_TONE: CommentTone = "short_native";
+const DEFAULT_TARGET_LANGUAGE: TargetCommentLanguage = "same_as_original";
+const DEFAULT_EXPLANATION_LANGUAGE: ExplanationLanguage = "vi";
 
 function isExtractedPost(value: unknown): value is ExtractedPost {
   return Boolean(
@@ -283,23 +281,181 @@ function isExtractedPostContext(value: unknown): value is ExtractedPostContext {
   );
 }
 
+function truncateForHarness(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed;
+}
+
+function toHarnessPostSegment(post?: ExtractedPost | null): HarnessPostSegment | undefined {
+  if (!post) return undefined;
+  return {
+    text: truncateForHarness(post.text, 4000),
+    authorName: truncateForHarness(post.authorName, 120),
+    username: truncateForHarness(post.username, 80),
+    url: truncateForHarness(post.postUrl, 500),
+  };
+}
+
+function buildHarnessSuggestion(
+  comment: HarnessGeneratedComment,
+  tone: CommentTone,
+): CommentSuggestion {
+  return {
+    text: comment.text,
+    meaningVi: comment.reason,
+    tone,
+    risk: comment.risk,
+    whyItWorks: comment.reason,
+    score: {
+      total: comment.score,
+      postFit: comment.score,
+      visibility: comment.score,
+      specificity: comment.score,
+      native: comment.score,
+      engagementHook: comment.score,
+      whyVisible: comment.reason,
+    },
+  };
+}
+
+function mapHarnessToReplyPack(
+  harness: HarnessState,
+  postTextValue: string,
+  visionContext?: VisionContext,
+): ReplyPack | VisionReplyPack {
+  const decision = harness.finalDecision ?? harness.initialDecision;
+  const comments = [
+    harness.composerOutput?.bestPick,
+    ...(harness.composerOutput?.alternatives ?? []),
+  ].filter(Boolean) as HarnessGeneratedComment[];
+  const tone = DEFAULT_COMMENT_TONE;
+  const suggestions = comments.map((comment) => buildHarnessSuggestion(comment, tone));
+  const base: ReplyPack = {
+    detectedLanguage:
+      visionContext?.detectedLanguage ?? decision?.recommendedLanguage ?? "unknown",
+    translationLanguage: visionContext?.translationLanguage ?? "vi",
+    translation: visionContext?.translation ?? "",
+    summary: visionContext?.summary ?? postTextValue,
+    context: visionContext?.context ?? decision?.commentStrategy ?? "",
+    theme: visionContext?.theme ?? decision?.zone ?? "general",
+    topic: visionContext?.topic ?? decision?.intent ?? "auto",
+    sentiment: visionContext?.sentiment ?? "auto",
+    commentStrategy:
+      visionContext?.commentStrategy ?? decision?.commentStrategy ?? "Harness generated reply candidates.",
+    suggestions,
+  };
+
+  if (!visionContext) return base;
+
+  return {
+    ...base,
+    analysisMode:
+      visionContext.analysisMode === "vision_context" ? "vision" : "text_only_fallback",
+    imageAnalysis: visionContext.imageAnalysis,
+    combinedContext: visionContext.combinedContext,
+    imageErrors: visionContext.imageErrors,
+  };
+}
+
+function buildReplyPackFromHistoryItems(items: CommentHistoryItem[]): ReplyPack {
+  const primary = items[0];
+  return {
+    detectedLanguage: primary.language ?? "unknown",
+    translationLanguage: "vi",
+    translation: primary.meaningVi ?? "",
+    summary:
+      primary.analysis?.textSummary ??
+      primary.analysis?.combinedContext ??
+      primary.postText ??
+      "Saved DB history item.",
+    context: primary.analysis?.combinedContext ?? primary.postText ?? "",
+    theme: primary.postType ?? "history",
+    topic: primary.analysis?.topic ?? primary.analysis?.intent ?? "saved_comment",
+    sentiment: primary.analysis?.tone ?? "saved",
+    commentStrategy:
+      primary.analysis?.commentStrategy ?? "Previewing saved comments from DB history.",
+    suggestions: items.map((item) => {
+      const score = item.optimizationScore ?? 0;
+      const whyItWorks =
+        item.optimizationReason?.join("; ") ||
+        item.analysis?.commentStrategy ||
+        "Saved comment from DB history.";
+      return {
+        text: item.text,
+        meaningVi: item.meaningVi ?? "",
+        tone: (item.tone as CommentTone | undefined) ?? DEFAULT_COMMENT_TONE,
+        risk: item.risk ?? "low",
+        whyItWorks,
+        score: score
+          ? {
+              total: score,
+              postFit: score,
+              visibility: score,
+              specificity: score,
+              native: score,
+              engagementHook: score,
+              whyVisible: whyItWorks,
+            }
+          : undefined,
+      };
+    }),
+  };
+}
+
+function buildPostFromHistoryItem(item: CommentHistoryItem): ExtractedPost {
+  return {
+    platform: "x",
+    postUrl: item.postUrl,
+    tweetId: item.tweetId,
+    authorName: item.authorName,
+    username: item.username,
+    text: item.postText ?? "",
+    media: item.media
+      .filter((media) => media.mediaUrl)
+      .map((media, index) => ({
+        type: "image" as const,
+        url: media.mediaUrl!,
+        altText: media.altText,
+        photoIndex: index + 1,
+      })),
+    detectedAt: item.createdAt,
+    source: "visible_cache",
+  };
+}
+
+function getHarnessSkipMessage(harness: HarnessState): string {
+  const decision = harness.finalDecision ?? harness.initialDecision;
+  const reasons = [
+    decision?.zone ? `zone=${decision.zone}` : undefined,
+    decision?.shouldComment === false ? "driver_recommended_skip" : undefined,
+    ...(decision?.contextReasons ?? []),
+    ...(decision?.avoid ?? []),
+    ...(harness.composerOutput?.warnings ?? []),
+    ...harness.warnings,
+  ]
+    .filter(Boolean)
+    .map((reason) => String(reason))
+    .filter((reason, index, all) => all.indexOf(reason) === index)
+    .slice(0, 6);
+
+  return reasons.length > 0
+    ? `Harness skipped this post. Reason: ${reasons.join("; ")}`
+    : "Harness skipped this post because it could not find a safe, context-aware comment angle.";
+}
+
 export function App() {
   const { t } = useTranslation();
   const [deviceId] = useState(() => getDeviceId());
   const [postText, setPostText] = useState(defaultPostText);
   const [imageUrl, setImageUrl] = useState("");
   const [imageAltText, setImageAltText] = useState("");
-  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>("text");
-  const [tone, setTone] = useState<CommentTone>("short_native");
-  const [targetLanguage, setTargetLanguage] =
-    useState<TargetCommentLanguage>("same_as_original");
-  const [explanationLanguage, setExplanationLanguage] =
-    useState<ExplanationLanguage>("vi");
-  const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() =>
-    i18n.language === "en" ? "en" : "vi",
-  );
-  const [isUiLanguageMenuOpen, setIsUiLanguageMenuOpen] = useState(false);
-  const [maxSuggestions, setMaxSuggestions] = useState(5);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>(DEFAULT_ANALYSIS_MODE);
+  const [tone] = useState<CommentTone>(DEFAULT_COMMENT_TONE);
+  const [targetLanguage] = useState<TargetCommentLanguage>(DEFAULT_TARGET_LANGUAGE);
+  const [explanationLanguage] = useState<ExplanationLanguage>(DEFAULT_EXPLANATION_LANGUAGE);
+  const [maxSuggestions] = useState(DEFAULT_MAX_SUGGESTIONS);
   const [replyPack, setReplyPack] = useState<
     ReplyPack | VisionReplyPack | null
   >(null);
@@ -307,10 +463,16 @@ export function App() {
   const [selectedPostContext, setSelectedPostContext] =
     useState<ExtractedPostContext | null>(null);
   const [selectedImageUrls, setSelectedImageUrls] = useState<string[]>([]);
+  const [authSession, setAuthSessionState] = useState<AuthSession | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPhone, setLoginPhone] = useState("");
+  const [loginName, setLoginName] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authMessageType, setAuthMessageType] = useState<AuthMessageType>("info");
   const [detectionMessage, setDetectionMessage] = useState<string | null>(null);
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>(() =>
-    getHistoryItems(),
-  );
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheMessage, setCacheMessage] = useState<string | null>(null);
@@ -329,8 +491,297 @@ export function App() {
   const [feedScanMessage, setFeedScanMessage] = useState<string | null>(null);
   const [isScanningFeed, setIsScanningFeed] = useState(false);
   const [isScoringPost, setIsScoringPost] = useState(false);
+  const [historyItems, setHistoryItems] = useState<CommentHistoryItem[]>([]);
+  const [historyMessage, setHistoryMessage] = useState<string | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyCopyStates, setHistoryCopyStates] = useState<Record<string, "idle" | "copying" | "copied" | "failed">>({});
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
   const [persistedGeneration, setPersistedGeneration] =
     useState<PersistedGeneration | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getAuthSession()
+      .then(async (session) => {
+        if (!session) return null;
+        const user = await getMe();
+        return { ...session, user };
+      })
+      .then((session) => {
+        if (cancelled) return;
+        setAuthSessionState(session);
+        setAuthMessageType("success");
+        setAuthMessage(session ? "Logged in. DB sync is enabled." : null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAuthSessionState(null);
+          setAuthMessageType("error");
+          setAuthMessage("Session expired. Please login again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsAuthLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleAuthSubmit() {
+    const email = loginEmail.trim() || undefined;
+    const phone = authMode === "create" ? loginPhone.trim() || undefined : undefined;
+    if (!email && !phone) {
+      setAuthMessageType("error");
+      setAuthMessage("Enter an email or phone number.");
+      return;
+    }
+
+    if (loginPassword.length < 8) {
+      setAuthMessageType("error");
+      setAuthMessage("Password must be at least 8 characters.");
+      return;
+    }
+
+    setIsAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      const session =
+        authMode === "create"
+          ? await register({
+              email,
+              phone,
+              name: loginName.trim() || undefined,
+              password: loginPassword,
+            })
+          : await login({
+              email,
+              phone,
+              password: loginPassword,
+            });
+      await setAuthSession(session);
+      setAuthSessionState(session);
+      setAuthMessageType("success");
+      setAuthMessage(
+        authMode === "create"
+          ? "Account created. New generations will be saved to DB."
+          : "Logged in. New generations will be saved to DB.",
+      );
+    } catch (loginError) {
+      setAuthMessageType("error");
+      setAuthMessage(
+        loginError instanceof Error ? loginError.message : "Login failed.",
+      );
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    setIsAuthLoading(true);
+    try {
+      await logout();
+    } finally {
+      setAuthSessionState(null);
+      setPersistedGeneration(null);
+      setAuthMessageType("info");
+      setAuthMessage("Logged out. Login is required before generating.");
+      setIsAuthLoading(false);
+    }
+  }
+
+  function handleXOAuth() {
+    if (!X_OAUTH_AUTHORIZE_URL) {
+      setAuthMessageType("error");
+      setAuthMessage(
+        "X OAuth is not configured yet. Set VITE_X_OAUTH_AUTHORIZE_URL to enable this button.",
+      );
+      return;
+    }
+
+    window.open(X_OAUTH_AUTHORIZE_URL, "_blank", "noopener,noreferrer");
+    setAuthMessage("Opened X OAuth. Complete the flow, then return here.");
+  }
+
+  function renderAuthPanel() {
+    const authIdentity = authSession?.user.email ?? authSession?.user.phone ?? "this account";
+
+    return (
+      <section className="panel authPanel">
+        <div>
+          <p className="eyebrow">Account</p>
+          <h2>{authSession ? "Logged in" : "Login or create account"}</h2>
+          <p className="muted">
+            {authSession
+              ? `Saving all generated comments to DB as ${authIdentity}.`
+              : "Sign in before using the assistant. Every request will include your JWT and every generation will be saved by user ID."}
+          </p>
+        </div>
+
+        {authSession ? (
+          <div className="authRow">
+            <div className="authAvatar">
+              {(authSession.user.name ?? authIdentity).slice(0, 1).toUpperCase()}
+            </div>
+            <div className="authIdentity">
+              <strong>{authSession.user.name || authIdentity}</strong>
+              <span>{authSession.user.userId}</span>
+            </div>
+            <button
+              className="secondaryButton"
+              type="button"
+              disabled={isAuthLoading}
+              onClick={() => void handleLogout()}
+            >
+              Logout
+            </button>
+          </div>
+        ) : (
+          <div className="authGate">
+            <div className="authTabs" role="tablist" aria-label="Account mode">
+              <button
+                className="authTab"
+                type="button"
+                data-selected={authMode === "login"}
+                onClick={() => {
+                  setAuthMode("login");
+                  setLoginPhone("");
+                  setLoginName("");
+                  setAuthMessage(null);
+                }}
+              >
+                Login
+              </button>
+              <button
+                className="authTab"
+                type="button"
+                data-selected={authMode === "create"}
+                onClick={() => {
+                  setAuthMode("create");
+                  setAuthMessage(null);
+                }}
+              >
+                Create account
+              </button>
+            </div>
+
+            <button
+              className="xOAuthButton"
+              type="button"
+              disabled={isAuthLoading}
+              onClick={handleXOAuth}
+            >
+              Continue with X
+            </button>
+
+            <div className="authDivider"><span>or use email</span></div>
+
+            <div className="authForm">
+              <label className="field">
+                Email
+                <input
+                  type="email"
+                  value={loginEmail}
+                  placeholder="you@example.com"
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                />
+              </label>
+              {authMode === "create" ? (
+                <>
+                  <label className="field">
+                    Phone optional
+                    <input
+                      type="tel"
+                      value={loginPhone}
+                      placeholder="+84901234567"
+                      onChange={(event) => setLoginPhone(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    Display name optional
+                    <input
+                      type="text"
+                      value={loginName}
+                      placeholder="Display name"
+                      onChange={(event) => setLoginName(event.target.value)}
+                    />
+                  </label>
+                </>
+              ) : null}
+              <label className="field">
+                Password
+                <input
+                  type="password"
+                  value={loginPassword}
+                  placeholder="At least 8 characters"
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                />
+              </label>
+              <button
+                className="primaryButton"
+                type="button"
+                disabled={isAuthLoading}
+                onClick={() => void handleAuthSubmit()}
+              >
+                {isAuthLoading
+                  ? "Checking session..."
+                  : authMode === "create"
+                    ? "Create account"
+                    : "Login"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {authMessage ? (
+          <p
+            className={
+              authMessageType === "error"
+                ? "errorText"
+                : authMessageType === "success"
+                  ? "successText"
+                  : "muted"
+            }
+          >
+            {authMessage}
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+
+  async function loadCommentHistory() {
+    setIsLoadingHistory(true);
+    setHistoryMessage(null);
+    try {
+      const history = await getCommentHistory(20);
+      setHistoryItems(history.items);
+      setHistoryMessage(
+        history.items.length > 0 ? null : "No saved generation history yet.",
+      );
+    } catch (historyError) {
+      setHistoryMessage(
+        historyError instanceof Error
+          ? historyError.message
+          : "Could not load comment history.",
+      );
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!authSession) {
+      setHistoryItems([]);
+      setHistoryMessage(null);
+      return;
+    }
+
+    void loadCommentHistory();
+  }, [authSession?.accessToken]);
 
   function trackEvent(
     eventName: UsageEventName,
@@ -354,17 +805,6 @@ export function App() {
     });
   }
 
-  function handleUiLanguageChange(nextLanguage: UiLanguage) {
-    setUiLanguage(nextLanguage);
-    setIsUiLanguageMenuOpen(false);
-    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, nextLanguage);
-    void i18n.changeLanguage(nextLanguage);
-  }
-
-  function getUiLanguageLabel(language: UiLanguage) {
-    return language === "vi" ? t("controls.vietnamese") : t("controls.english");
-  }
-
   function applyDetectedPost(post: ExtractedPost, postContext?: ExtractedPostContext) {
     setSelectedPost(post);
     setSelectedPostContext(postContext ?? null);
@@ -376,6 +816,7 @@ export function App() {
       setImageUrl(defaultMedia[0]?.url ?? "");
       setImageAltText(defaultMedia[0]?.altText ?? "");
     } else {
+      setAnalysisMode("text");
       setSelectedImageUrls([]);
       setImageUrl("");
       setImageAltText("");
@@ -394,6 +835,61 @@ export function App() {
     setCopyStates({});
     setFeedbackStates({});
     setPersistedGeneration(null);
+  }
+
+  function previewHistoryItem(item: CommentHistoryItem) {
+    const siblings = item.analysisId
+      ? historyItems.filter((h) => h.analysisId === item.analysisId)
+      : [item];
+    const group = siblings.length > 0 ? siblings : [item];
+    setReplyPack(buildReplyPackFromHistoryItems(group));
+    setError(null);
+    setDetectionMessage(null);
+    setManualCopyText(null);
+    setCopyStates({});
+    setFeedbackStates({});
+    setPersistedGeneration({
+      postId: item.postId,
+      analysisId: item.analysisId ?? null,
+      suggestionIds: group.map((h) => h.suggestionId),
+      postUrl: item.postUrl,
+      tweetId: item.tweetId,
+    });
+    setCacheMessage(`Previewing ${group.length} saved suggestion${group.length !== 1 ? "s" : ""} from DB history.`);
+  }
+
+  function loadHistoryPost(item: CommentHistoryItem) {
+    if (!item.postText?.trim()) {
+      setCacheMessage(null);
+      setError("This history item does not include source post text.");
+      return;
+    }
+
+    const post = buildPostFromHistoryItem(item);
+    setSelectedPost(post);
+    setSelectedPostContext(null);
+    setPostText(post.text);
+    if (post.media.length > 0) {
+      setAnalysisMode("vision");
+      setSelectedImageUrls(post.media.slice(0, 4).map((media) => media.url));
+      setImageUrl(post.media[0]?.url ?? "");
+      setImageAltText(post.media[0]?.altText ?? "");
+    } else {
+      setAnalysisMode("text");
+      setSelectedImageUrls([]);
+      setImageUrl("");
+      setImageAltText("");
+    }
+    setReplyPack(null);
+    setPostScoreResult(null);
+    setPostScoreMessage(null);
+    setError(null);
+    setDetectionMessage(null);
+    setManualCopyText(null);
+    setCopyStates({});
+    setFeedbackStates({});
+    setPersistedGeneration(null);
+    setCacheMessage("Loaded source post from DB history. You can generate fresh comments for it now.");
   }
 
   function getPostTypeForPersistence() {
@@ -464,11 +960,103 @@ export function App() {
     return [];
   }
 
+  function buildHarnessMedia(visionContext?: VisionContext) {
+    const selectedMedia = selectedPost?.media.length
+      ? selectedPost.media
+          .filter((item) => selectedImageUrls.includes(item.url))
+          .slice(0, 4)
+      : imageUrl.trim()
+        ? [
+            {
+              type: "image" as const,
+              url: imageUrl.trim(),
+              altText: imageAltText.trim() || undefined,
+            },
+          ]
+        : [];
+
+    if (visionContext?.imageAnalysis) {
+      return selectedMedia.map((media) => ({
+        type: "image" as const,
+        altText: truncateForHarness(
+          [
+            media.altText,
+            visionContext.imageAnalysis?.summary
+              ? `Vision summary: ${visionContext.imageAnalysis.summary}`
+              : undefined,
+            visionContext.imageAnalysis?.visualTone
+              ? `Visual tone: ${visionContext.imageAnalysis.visualTone}`
+              : undefined,
+            visionContext.combinedContext?.explanation
+              ? `Combined context: ${visionContext.combinedContext.explanation}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          1000,
+        ),
+        ocrText: truncateForHarness(visionContext.imageAnalysis?.visibleText, 2000),
+      }));
+    }
+
+    return selectedMedia.map((media) => ({
+      type: "image" as const,
+      altText: truncateForHarness(media.altText, 1000),
+    }));
+  }
+
+  function buildHarnessInput(visionContext?: VisionContext): HarnessDriverInput {
+    const missingFields = [
+      selectedPost?.postUrl ? undefined : "post_url",
+      selectedPost?.authorName && selectedPost?.username ? undefined : "author_identity",
+    ].filter(Boolean) as string[];
+    const media = buildHarnessMedia(visionContext);
+
+    return {
+      platform: "x",
+      mainPost: {
+        text: truncateForHarness(postText, 4000),
+        authorName: truncateForHarness(selectedPost?.authorName, 120),
+        username: truncateForHarness(selectedPost?.username, 80),
+        language: truncateForHarness(visionContext?.detectedLanguage, 20),
+        url: truncateForHarness(selectedPost?.postUrl, 500),
+      },
+      media: media.length > 0 ? media : undefined,
+      quotedPost: toHarnessPostSegment(selectedPostContext?.quotedPost),
+      repostedPost: toHarnessPostSegment(selectedPostContext?.repostedPost),
+      parentPost: toHarnessPostSegment(selectedPostContext?.parentPost),
+      extraction: {
+        confidence: selectedPostContext
+          ? selectedPostContext.extraction.confidence
+          : selectedPost
+            ? 0.9
+            : 0.5,
+        warnings: [
+          ...(selectedPostContext?.extraction.warnings ?? []),
+          ...(selectedPost ? [] : ["manual_text_input"]),
+          ...(visionContext?.imageErrors ?? []),
+        ],
+        missingFields,
+      },
+      contextState: {
+        isExpanded: Boolean(selectedPostContext || visionContext),
+        expansionSources: [
+          selectedPostContext ? "x_dom_context" : undefined,
+          visionContext ? "vision_context" : undefined,
+        ].filter(Boolean) as string[],
+        needsMoreContext: !selectedPostContext && !visionContext,
+      },
+    };
+  }
+
   function getSuggestionScoreTotal(suggestion: CommentSuggestion): number | undefined {
     return suggestion.score?.total;
   }
 
-  async function persistGeneratedContent(result: ReplyPack | VisionReplyPack) {
+  async function persistGeneratedContent(
+    result: ReplyPack | VisionReplyPack,
+    harness?: HarnessState,
+  ) {
     const response = await saveFullContext({
       platform: "x",
       postUrl: selectedPost?.postUrl,
@@ -485,6 +1073,9 @@ export function App() {
         targetLanguage,
         tone,
         postScore: postScoreResult?.score,
+        harnessRunId: harness?.runId,
+        harnessFinalDecision: harness?.finalDecision,
+        harnessWarnings: harness?.warnings,
       },
       extractionConfidence: selectedPostContext
         ? Math.round(selectedPostContext.extraction.confidence * 100)
@@ -507,8 +1098,8 @@ export function App() {
             ? result.combinedContext.explanation
             : result.context,
         topic: result.topic,
-        tone,
-        intent: result.theme,
+        tone: harness?.finalDecision?.recommendedTone ?? tone,
+        intent: harness?.finalDecision?.intent ?? result.theme,
         sentiment: result.sentiment,
         commentStrategy: result.commentStrategy,
         warnings: "imageErrors" in result ? result.imageErrors : [],
@@ -533,8 +1124,53 @@ export function App() {
       postId: response.postId,
       analysisId: response.analysisId,
       suggestionIds: response.suggestionIds,
+      postUrl: selectedPost?.postUrl,
+      tweetId: selectedPost?.tweetId,
     });
     return response;
+  }
+
+  function prependHistoryItems(
+    result: ReplyPack | VisionReplyPack,
+    persisted: SaveFullContextResponse,
+  ) {
+    const now = new Date().toISOString();
+    const newItems: CommentHistoryItem[] = result.suggestions
+      .slice(0, persisted.suggestionIds.length)
+      .map((suggestion, index) => ({
+        suggestionId: persisted.suggestionIds[index] ?? "",
+        postId: persisted.postId,
+        analysisId: persisted.analysisId ?? undefined,
+        postType: selectedPostContext?.contextType ?? "unknown",
+        postUrl: selectedPost?.postUrl,
+        tweetId: selectedPost?.tweetId,
+        postText: postText,
+        authorName: selectedPost?.authorName,
+        username: selectedPost?.username,
+        media: [],
+        text: suggestion.text,
+        language: result.detectedLanguage,
+        tone: suggestion.tone,
+        meaningVi: suggestion.meaningVi,
+        risk: suggestion.risk,
+        optimizationScore: suggestion.score?.total,
+        optimizationReason: suggestion.whyItWorks ? [suggestion.whyItWorks] : [],
+        used: false,
+        actions: [],
+        analysis: {
+          mode: "analysisMode" in result ? result.analysisMode : analysisMode,
+          textSummary: result.summary,
+          combinedContext: result.context,
+          topic: result.topic,
+          tone: suggestion.tone,
+          sentiment: result.sentiment,
+          commentStrategy: result.commentStrategy,
+        },
+        createdAt: now,
+      }));
+
+    // Prepend newest items, cap at 20 to match server default.
+    setHistoryItems((prev) => [...newItems, ...prev].slice(0, 20));
   }
 
   function sendPendingCommentToCurrentTab(
@@ -553,8 +1189,8 @@ export function App() {
         pending: {
           postId: persistedGeneration.postId,
           suggestionId,
-          parentPostUrl: selectedPost?.postUrl,
-          parentTweetId: selectedPost?.tweetId,
+          parentPostUrl: persistedGeneration.postUrl ?? selectedPost?.postUrl,
+          parentTweetId: persistedGeneration.tweetId ?? selectedPost?.tweetId,
           commentText: suggestion.text,
           commentLanguage:
             targetLanguage === "same_as_original" ? undefined : targetLanguage,
@@ -619,6 +1255,44 @@ export function App() {
         return;
       }
 
+      function injectDetectorAndRetry(reason: string) {
+        if (options.retryAfterInject || !api.scripting?.executeScript) {
+          setDetectionMessage(
+            `Could not reach X detector: ${reason}. Refresh the X tab and reload the extension.`,
+          );
+          return;
+        }
+
+        if (!options.silent) {
+          setDetectionMessage("Injecting X detector into the current tab...");
+        }
+
+        api.scripting.executeScript(
+          {
+            target: { tabId: activeTab.id! },
+            files: ["assets/contentScript.js"],
+          },
+          () => {
+            const injectionError = api.runtime?.lastError?.message;
+            if (injectionError) {
+              setDetectionMessage(
+                `Could not inject X detector: ${injectionError}. Reload the extension and refresh X.`,
+              );
+              return;
+            }
+
+            window.setTimeout(
+              () =>
+                detectCurrentTabPost({
+                  ...options,
+                  retryAfterInject: true,
+                }),
+              300,
+            );
+          },
+        );
+      }
+
       function sendDetectMessage() {
         api.tabs!.sendMessage(
           activeTab.id!,
@@ -626,43 +1300,7 @@ export function App() {
           (response) => {
             const runtimeError = api.runtime?.lastError?.message;
             if (runtimeError) {
-              if (!options.retryAfterInject && api.scripting?.executeScript) {
-                if (!options.silent) {
-                  setDetectionMessage(
-                    "Injecting X detector into the current tab...",
-                  );
-                }
-
-                api.scripting.executeScript(
-                  {
-                    target: { tabId: activeTab.id! },
-                    files: ["assets/contentScript.js"],
-                  },
-                  () => {
-                    const injectionError = api.runtime?.lastError?.message;
-                    if (injectionError) {
-                      setDetectionMessage(
-                        `Could not inject X detector: ${injectionError}. Reload the extension and refresh X.`,
-                      );
-                      return;
-                    }
-
-                    window.setTimeout(
-                      () =>
-                        detectCurrentTabPost({
-                          ...options,
-                          retryAfterInject: true,
-                        }),
-                      150,
-                    );
-                  },
-                );
-                return;
-              }
-
-              setDetectionMessage(
-                `Could not reach X detector: ${runtimeError}. Refresh the X tab and reload the extension.`,
-              );
+              injectDetectorAndRetry(runtimeError);
               return;
             }
 
@@ -680,7 +1318,15 @@ export function App() {
         );
       }
 
-      sendDetectMessage();
+      api.tabs!.sendMessage(activeTab.id!, { type: "XCA_PING" }, () => {
+        const runtimeError = api.runtime?.lastError?.message;
+        if (runtimeError) {
+          injectDetectorAndRetry(runtimeError);
+          return;
+        }
+
+        sendDetectMessage();
+      });
     });
   }
 
@@ -855,7 +1501,6 @@ export function App() {
   useEffect(() => {
     if (!selectedPost) return;
 
-    let cancelled = false;
     setIsScoringPost(true);
     setPostScoreMessage("Scoring this post for growth decision...");
 
@@ -874,45 +1519,16 @@ export function App() {
     );
     pushPostOverlayToCurrentTab(selectedPost, localResult.score);
     setIsScoringPost(false);
-
-    void scorePost(buildPostScoreRequest(selectedPost))
-      .then((result) => {
-        if (cancelled) return;
-        setPostScoreResult(result);
-        setCacheMessage(
-          `${getOpportunityLabelVi(result.score.label)} · ${formatRecommendedAction(result.score.recommendedAction)}`,
-        );
-        pushPostOverlayToCurrentTab(selectedPost, result.score);
-      })
-      .catch((scoreError) => {
-        if (cancelled) return;
-        setPostScoreResult(null);
-        setPostScoreMessage(
-          scoreError instanceof Error
-            ? scoreError.message
-            : "Could not score this post.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setIsScoringPost(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
   }, [selectedPost]);
-
-  function persistHistory(
-    request: GenerateReplyPackRequest,
-    result: ReplyPack,
-  ) {
-    addHistoryItem(request, result);
-    setHistoryItems(getHistoryItems());
-  }
 
   async function handleGenerate(
     options: { refreshVisionContext?: boolean } = {},
   ) {
+    if (!authSession) {
+      setError("Login before generating so the result can be saved to your DB history.");
+      return;
+    }
+
     if (!postText.trim()) {
       setError("Paste post text before generating suggestions.");
       return;
@@ -937,11 +1553,6 @@ export function App() {
           ]
         : [];
 
-    if (analysisMode === "vision" && visionMedia.length === 0) {
-      setError("Select or paste an image URL before using Text + image mode.");
-      return;
-    }
-
     const request: GenerateReplyPackRequest = {
       platform: "x",
       postText,
@@ -954,8 +1565,6 @@ export function App() {
       maxSuggestions,
     };
     const startedAt = performance.now();
-    const shouldBypassReplyCache =
-      Boolean(replyPack) || options.refreshVisionContext;
 
     setIsGenerating(true);
     setError(null);
@@ -969,31 +1578,12 @@ export function App() {
     }
     trackEvent("analyze_started", request);
 
-    const cacheKey =
-      analysisMode === "vision"
-        ? `${createReplyPackCacheKey(request)}|vision|${visionMedia.map((item) => item.url).join(",")}`
-        : createReplyPackCacheKey(request);
-    const cachedReplyPack = getCachedReplyPack(cacheKey);
-
-    if (cachedReplyPack && !shouldBypassReplyCache) {
-      const latencyMs = Math.round(performance.now() - startedAt);
-      setReplyPack(cachedReplyPack);
-      persistHistory(request, cachedReplyPack);
-      try {
-        await persistGeneratedContent(cachedReplyPack);
-        setCacheMessage("Loaded from local cache and saved to DB.");
-      } catch (persistError) {
-        setCacheMessage("Loaded from local cache. DB save failed; core flow still works.");
-      }
-      setIsGenerating(false);
-      trackEvent("analyze_succeeded", { ...request, latencyMs });
-      return;
-    }
-
     try {
       let result: ReplyPack | VisionReplyPack;
+      let harness: HarnessState;
+      let visionContext: VisionContext | undefined;
 
-      if (analysisMode === "vision") {
+      if (visionMedia.length > 0) {
         const visionRequest: AnalyzeVisionRequest = {
           post: {
             platform: "x",
@@ -1012,48 +1602,37 @@ export function App() {
             maxSuggestions,
           },
         };
-        const visionContextKey = createVisionContextCacheKey(visionRequest);
-        if (options.refreshVisionContext) {
-          deleteCachedVisionContext(visionContextKey);
-        }
-        let visionContext = getCachedVisionContext(visionContextKey);
-
-        if (!visionContext) {
-          setCacheMessage("Analyzing image context...");
-          visionContext = await analyzeVisionContext(visionRequest);
-          setCachedVisionContext(visionContextKey, visionContext);
-        } else {
-          setCacheMessage(
-            "Using cached image analysis. Generating fresh comments...",
-          );
-        }
-
-        result = await generateFromVisionContext({
-          post: visionRequest.post,
-          postContext: selectedPostContext ?? undefined,
-          visionContext,
-          options: visionRequest.options,
-        });
-      } else {
-        result = await generateReplyPack(request);
+        setCacheMessage("Analyzing image context...");
+        visionContext = await analyzeVisionContext(visionRequest);
       }
+
+      setCacheMessage("Running comment harness...");
+      harness = await runCommentHarness(buildHarnessInput(visionContext));
+      result = mapHarnessToReplyPack(harness, postText, visionContext);
+
+      if (result.suggestions.length === 0) {
+        throw new Error(
+          harness.status === "skipped"
+            ? getHarnessSkipMessage(harness)
+            : "Harness did not return any comment candidates.",
+        );
+      }
+
       const latencyMs = Math.round(performance.now() - startedAt);
       setReplyPack(result);
-      setCachedReplyPack(cacheKey, result);
-      persistHistory(request, result);
       let savedToDb = true;
       try {
-        await persistGeneratedContent(result);
+        const persisted = await persistGeneratedContent(result, harness);
+        // Optimistic local prepend — avoids re-fetching 20 items after each generate.
+        prependHistoryItems(result, persisted);
       } catch {
         savedToDb = false;
       }
       setCacheMessage(
         !savedToDb
-          ? "Generated suggestions. DB save failed; core flow still works."
+          ? "Generated suggestions. DB save failed; login/session or API needs attention."
           : options.refreshVisionContext
-          ? "Refreshed image analysis, generated fresh suggestions, and saved to DB."
-          : shouldBypassReplyCache
-            ? "Generated fresh suggestions using cached image analysis when available and saved to DB."
+            ? "Refreshed image analysis, generated fresh suggestions, and saved to DB."
             : "Generated suggestions and saved to DB.",
       );
       trackEvent("analyze_succeeded", { ...request, latencyMs });
@@ -1068,11 +1647,6 @@ export function App() {
     } finally {
       setIsGenerating(false);
     }
-  }
-
-  function handleToneChange(nextTone: CommentTone) {
-    setTone(nextTone);
-    trackEvent("tone_changed", { tone: nextTone });
   }
 
   async function handleCopy(index: number, suggestion: CommentSuggestion) {
@@ -1132,23 +1706,6 @@ export function App() {
     trackEvent("feedback_submitted", { feedback });
   }
 
-  function handleRestoreHistory(item: HistoryItem) {
-    setPostText(item.postText);
-    setTone(item.tone);
-    setTargetLanguage(item.targetCommentLanguage);
-    setReplyPack(item.replyPack);
-    setError(null);
-    setCacheMessage("Restored from local history.");
-    setManualCopyText(null);
-    setCopyStates({});
-    setFeedbackStates({});
-  }
-
-  function handleClearHistory() {
-    clearHistoryItems();
-    setHistoryItems([]);
-  }
-
   function toggleDetectedImage(url: string) {
     setSelectedImageUrls((current) => {
       if (current.includes(url)) {
@@ -1163,11 +1720,34 @@ export function App() {
     setImageUrl(nextUrl);
     if (selectedPost) {
       setSelectedPost(null);
+      setSelectedPostContext(null);
       setSelectedImageUrls([]);
       setCacheMessage(
         "Manual image URL mode. Detected post context is no longer linked.",
       );
     }
+  }
+
+  if (!authSession) {
+    return (
+      <main className="shell authShell">
+        <section className="hero authHero">
+          <p className="eyebrow">Phase 3.1 Growth Decision Engine</p>
+          <h1>X Comment Assistant</h1>
+          <p className="heroText">
+            Login or create an account to sync comment history, generated replies,
+            and growth signals by user ID.
+          </p>
+        </section>
+
+        <section className="safetyBanner">
+          This extension never sends replies automatically and never touches the X
+          reply box.
+        </section>
+
+        {renderAuthPanel()}
+      </main>
+    );
   }
 
   return (
@@ -1185,6 +1765,8 @@ export function App() {
         This extension never sends replies automatically and never touches the X
         reply box.
       </section>
+
+      {renderAuthPanel()}
 
       <section className="panel feedPanel">
         <div className="historyHeader">
@@ -1536,121 +2118,12 @@ export function App() {
           />
         </label>
 
-        <div className="controls">
-          <div className="field compact languagePicker">
-            <span>{t("controls.uiLanguage")}</span>
-            <button
-              className="secondaryButton languagePickerButton"
-              type="button"
-              aria-expanded={isUiLanguageMenuOpen}
-              onClick={() => setIsUiLanguageMenuOpen((current) => !current)}
-            >
-              <span>{t("controls.chooseLanguage")}</span>
-              <span>{getUiLanguageLabel(uiLanguage)}</span>
-            </button>
-            {isUiLanguageMenuOpen ? (
-              <div className="languagePickerMenu" role="menu">
-                <button
-                  type="button"
-                  className="languagePickerOption"
-                  onClick={() => handleUiLanguageChange("vi")}
-                >
-                  {t("controls.vietnamese")}
-                </button>
-                <button
-                  type="button"
-                  className="languagePickerOption"
-                  onClick={() => handleUiLanguageChange("en")}
-                >
-                  {t("controls.english")}
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <label className="field compact">
-            <span>{t("controls.analysisMode")}</span>
-            <select
-              value={analysisMode}
-              onChange={(event) =>
-                setAnalysisMode(event.target.value as AnalysisMode)
-              }
-            >
-              <option value="text">{t("controls.textOnly")}</option>
-              <option value="vision">{t("controls.textImage")}</option>
-            </select>
-          </label>
-
-          <label className="field compact">
-            <span>{t("controls.tone")}</span>
-            <select
-              value={tone}
-              onChange={(event) =>
-                handleToneChange(event.target.value as CommentTone)
-              }
-            >
-              <option value="short_native">{t("tone.short_native")}</option>
-              <option value="casual_supportive">{t("tone.casual_supportive")}</option>
-              <option value="question_based">{t("tone.question_based")}</option>
-              <option value="insightful">{t("tone.insightful")}</option>
-              <option value="funny_light">{t("tone.funny_light")}</option>
-              <option value="anime_fan">{t("tone.anime_fan")}</option>
-              <option value="crypto_casual">{t("tone.crypto_casual")}</option>
-              <option value="football_fan">{t("tone.football_fan")}</option>
-              <option value="congratulation">{t("tone.congratulation")}</option>
-            </select>
-          </label>
-
-          <label className="field compact">
-            <span>{t("controls.commentLanguage")}</span>
-            <select
-              value={targetLanguage}
-              onChange={(event) =>
-                setTargetLanguage(event.target.value as TargetCommentLanguage)
-              }
-            >
-              <option value="same_as_original">{t("controls.sameAsOriginal")}</option>
-              <option value="ja">{t("controls.japanese")}</option>
-              <option value="en">{t("controls.english")}</option>
-              <option value="vi">{t("controls.vietnamese")}</option>
-            </select>
-          </label>
-
-          <label className="field compact">
-            <span>{t("controls.analysisLanguage")}</span>
-            <select
-              value={explanationLanguage}
-              onChange={(event) =>
-                setExplanationLanguage(event.target.value as ExplanationLanguage)
-              }
-            >
-              <option value="vi">{t("controls.vietnamese")}</option>
-              <option value="en">{t("controls.english")}</option>
-            </select>
-            <small className="muted">{t("hints.analysisLanguage")}</small>
-          </label>
-
-          <label className="field compact">
-            <span>{t("controls.suggestionCount")}</span>
-            <select
-              value={maxSuggestions}
-              onChange={(event) => setMaxSuggestions(Number(event.target.value))}
-            >
-              <option value={3}>3</option>
-              <option value={4}>4</option>
-              <option value={5}>5</option>
-            </select>
-          </label>
-        </div>
-
         {analysisMode === "vision" ? (
           <div className="visionPreview">
             {selectedPost?.media.length ? (
               <div className="summaryBlock">
-                <h2>Detected images</h2>
-                <p className="muted">
-                  Select up to 4 images for vision analysis.
-                </p>
+                <h2>Ảnh trong bài viết</h2>
+                <p className="muted">Chọn tối đa 4 ảnh để AI phân tích.</p>
                 <div className="detectedImageGrid">
                   {selectedPost.media.map((media, index) => {
                     const selected = selectedImageUrls.includes(media.url);
@@ -1666,10 +2139,11 @@ export function App() {
                         <img
                           src={media.url}
                           alt={media.altText || `Detected image ${index + 1}`}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
                         />
                         <small>
-                          {selected ? "Selected" : "Click to select"} · image{" "}
-                          {media.photoIndex ?? index + 1}
+                          {selected ? "Selected" : "Click to select"} · image {media.photoIndex ?? index + 1}
                         </small>
                       </button>
                     );
@@ -1677,70 +2151,54 @@ export function App() {
                 </div>
               </div>
             ) : (
-              <label className="field">
-                <span>Image URL</span>
-                <input
-                  value={imageUrl}
-                  onChange={(event) =>
-                    handleManualImageChange(event.target.value)
-                  }
-                  placeholder="https://pbs.twimg.com/media/..."
-                />
-              </label>
+              <>
+                <label className="field">
+                  <span>Image URL</span>
+                  <input
+                    value={imageUrl}
+                    onChange={(event) => handleManualImageChange(event.target.value)}
+                    placeholder="https://pbs.twimg.com/media/..."
+                  />
+                </label>
+                <label className="field">
+                  <span>Alt text optional</span>
+                  <textarea
+                    value={imageAltText}
+                    onChange={(event) => setImageAltText(event.target.value)}
+                    rows={2}
+                    placeholder="Optional alt text from X..."
+                  />
+                </label>
+                {imageUrl.trim() ? (
+                  <div className="imagePreviewCard">
+                    <img
+                      src={imageUrl.trim()}
+                      alt={imageAltText || "Selected post media"}
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
+                    <p className="muted">
+                      Manual image preview. Backend fetches and analyzes this image after you click Analyze.
+                    </p>
+                  </div>
+                ) : null}
+              </>
             )}
-
-            {!selectedPost?.media.length ? (
-              <label className="field">
-                <span>Alt text</span>
-                <textarea
-                  value={imageAltText}
-                  onChange={(event) => setImageAltText(event.target.value)}
-                  rows={2}
-                  placeholder="Optional alt text from X..."
-                />
-              </label>
-            ) : null}
-
-            {!selectedPost?.media.length && imageUrl.trim() ? (
-              <div className="imagePreviewCard">
-                <img
-                  src={imageUrl.trim()}
-                  alt={imageAltText || "Selected post media"}
-                />
-                <p className="muted">
-                  Manual image preview. Backend fetches and analyzes this image
-                  only after you click Analyze.
-                </p>
-              </div>
-            ) : null}
           </div>
         ) : null}
 
         <button
           className="primaryButton"
           type="button"
-          disabled={isGenerating}
+          disabled={isGenerating || !authSession}
           onClick={() => void handleGenerate()}
         >
           {isGenerating
-            ? t("actions.analyzing")
-            : replyPack
-              ? t("actions.regenerate")
-              : analysisMode === "vision"
-                ? t("actions.analyze")
-                : t("actions.generate")}
+            ? "Đang phân tích..."
+            : authSession
+              ? "Phân tích bài viết"
+              : "Login để phân tích"}
         </button>
-
-        {analysisMode === "vision" && selectedPost?.media.length ? (
-          <button
-            className="secondaryButton detectButton"
-            type="button"
-            disabled={isGenerating}
-            onClick={() => void handleGenerate({ refreshVisionContext: true })}
-          >
-            {t("actions.refreshVision")}
-          </button>
-        ) : null}
 
         {error ? <p className="errorText">{error}</p> : null}
         {cacheMessage ? <p className="successText">{cacheMessage}</p> : null}
@@ -1921,38 +2379,179 @@ export function App() {
 
       <section className="panel historyPanel">
         <div className="historyHeader">
-          <h2>Local history</h2>
+          <div>
+            <h2>Saved comment history</h2>
+            <p className="muted">Preview old comments or reload their source post.</p>
+          </div>
           <button
             className="secondaryButton"
             type="button"
-            disabled={historyItems.length === 0}
-            onClick={handleClearHistory}
+            disabled={isLoadingHistory}
+            onClick={() => void loadCommentHistory()}
           >
-            Clear
+            {isLoadingHistory ? "Loading..." : "Refresh"}
           </button>
         </div>
 
-        {historyItems.length === 0 ? (
-          <p className="muted">No analyzed posts saved in this browser yet.</p>
-        ) : (
+        {historyMessage ? <p className="muted">{historyMessage}</p> : null}
+
+        {historyItems.length > 0 ? (
           <div className="historyList">
-            {historyItems.slice(0, 5).map((item) => (
-              <button
-                className="historyItem"
-                type="button"
-                key={item.id}
-                onClick={() => handleRestoreHistory(item)}
-              >
-                <span>{item.replyPack.summary}</span>
-                <small>
-                  {new Date(item.createdAt).toLocaleString()} · {item.tone} ·{" "}
-                  {item.replyPack.theme}
-                </small>
-              </button>
-            ))}
+            {historyItems.slice(0, 10).map((item) => {
+              const copyState = historyCopyStates[item.suggestionId] ?? "idle";
+              const isExpanded = expandedHistoryId === item.suggestionId;
+
+              function handleCopyHistory() {
+                if (copyState === "copying") return;
+                setHistoryCopyStates((prev) => ({ ...prev, [item.suggestionId]: "copying" }));
+                copyTextToClipboard(item.text)
+                  .then((result) => {
+                    setHistoryCopyStates((prev) => ({
+                      ...prev,
+                      [item.suggestionId]: result.ok ? "copied" : "failed",
+                    }));
+                    if (result.ok) {
+                      window.setTimeout(() => {
+                        setHistoryCopyStates((prev) => ({ ...prev, [item.suggestionId]: "idle" }));
+                      }, 2500);
+                    }
+                  })
+                  .catch(() => {
+                    setHistoryCopyStates((prev) => ({ ...prev, [item.suggestionId]: "failed" }));
+                  });
+              }
+
+              return (
+                <article
+                  className={`historyItem${isExpanded ? " historyItemExpanded" : ""}`}
+                  key={item.suggestionId}
+                >
+                  {/* ── Collapsed header — always visible ── */}
+                  <button
+                    className="historyItemHeader"
+                    type="button"
+                    aria-expanded={isExpanded}
+                    onClick={() =>
+                      setExpandedHistoryId(isExpanded ? null : item.suggestionId)
+                    }
+                  >
+                    <span className="historyItemPreviewText">{item.text}</span>
+                    <span className="historyItemChevron" aria-hidden="true">
+                      {isExpanded ? "▲" : "▼"}
+                    </span>
+                  </button>
+
+                  <div className="historyItemMeta">
+                    <span>{new Date(item.createdAt).toLocaleString()}</span>
+                    {(item.username ?? item.authorName) ? (
+                      <span className="historyMetaBadge">@{item.username ?? item.authorName}</span>
+                    ) : null}
+                    {item.optimizationScore != null ? (
+                      <span className="historyMetaBadge historyScoreBadge">score {item.optimizationScore}</span>
+                    ) : null}
+                    {item.risk ? (
+                      <span className={`historyMetaBadge historyRiskBadge historyRisk--${item.risk}`}>{item.risk}</span>
+                    ) : null}
+                  </div>
+
+                  {/* ── Expanded panel ── */}
+                  {isExpanded ? (
+                    <div className="historyExpandedPanel">
+                      {/* Full comment block */}
+                      <div className="historyCommentBlock">
+                        <p className="historyCommentText">{item.text}</p>
+                        <div className="historyCommentFooter">
+                          {copyState === "copied" ? (
+                            <span className="historyCommentCopied">✓ Copied to clipboard</span>
+                          ) : copyState === "failed" ? (
+                            <span className="historyCommentFailed">Copy failed — try again</span>
+                          ) : null}
+                          <button
+                            className={`historyBigCopy${copyState === "copied" ? " historyBigCopied" : ""}`}
+                            type="button"
+                            disabled={copyState === "copying"}
+                            onClick={handleCopyHistory}
+                          >
+                            {copyState === "copied"
+                              ? "✓ Copied"
+                              : copyState === "copying"
+                                ? "Copying..."
+                                : "Copy comment"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Vietnamese meaning */}
+                      {item.meaningVi ? (
+                        <p className="historyMeaning">{item.meaningVi}</p>
+                      ) : null}
+
+                      {/* Post context */}
+                      {item.postText ? (
+                        <div className="historyPostContext">
+                          <span className="historyContextLabel">Post</span>
+                          <p>{item.postText}</p>
+                        </div>
+                      ) : null}
+
+                      {/* Strategy */}
+                      {item.analysis?.commentStrategy ? (
+                        <div className="historyPostContext">
+                          <span className="historyContextLabel">Strategy</span>
+                          <p>{item.analysis.commentStrategy}</p>
+                        </div>
+                      ) : null}
+
+                      {/* Media */}
+                      {item.media.length > 0 ? (
+                        <p className="historyMediaNote">
+                          📷 {item.media.length} image{item.media.length > 1 ? "s" : ""} attached
+                        </p>
+                      ) : null}
+
+                      {/* Actions */}
+                      <div className="historyActions">
+                        <button
+                          className="secondaryButton"
+                          type="button"
+                          onClick={() => previewHistoryItem(item)}
+                        >
+                          Preview in results
+                        </button>
+                        <button
+                          className="secondaryButton"
+                          type="button"
+                          disabled={!item.postText}
+                          onClick={() => loadHistoryPost(item)}
+                        >
+                          Load source post
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Collapsed: show small copy pill */
+                    <div className="historyCollapsedCopy">
+                      <button
+                        className={`historyInlineCopy${copyState === "copied" ? " historyInlineCopied" : ""}`}
+                        type="button"
+                        disabled={copyState === "copying"}
+                        title={copyState === "copied" ? "Copied!" : "Copy comment"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCopyHistory();
+                        }}
+                      >
+                        {copyState === "copied" ? "✓ Copied" : copyState === "failed" ? "Failed" : "Copy"}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
           </div>
-        )}
+        ) : null}
       </section>
+
 
       {manualCopyText ? (
         <section className="panel manualCopy">

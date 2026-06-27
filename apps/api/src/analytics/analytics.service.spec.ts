@@ -45,7 +45,7 @@ describe('AnalyticsService', () => {
           }),
         }),
       }),
-    } as unknown as UsageEventsCollectionMock;
+    };
 
     return {
       collection: jest.fn().mockReturnValue(usageEventsCollection),
@@ -58,7 +58,7 @@ describe('AnalyticsService', () => {
     const mongoService = {
       db: jest.fn().mockResolvedValue(dbMock),
     } as unknown as MongoService;
-    const service = new AnalyticsService(mongoService);
+    const service = new AnalyticsService(mongoService, null as never);
 
     await expect(
       service.track({
@@ -66,7 +66,7 @@ describe('AnalyticsService', () => {
         eventName: 'copy_clicked',
         platform: 'x',
         postUrl: 'https://x.com/example/status/1',
-      }),
+      }, 'user-1'),
     ).resolves.toEqual({ ok: true });
 
     expect(dbMock.collection).toHaveBeenCalledWith('usage_events');
@@ -76,6 +76,7 @@ describe('AnalyticsService', () => {
     expect(insertedDoc.eventName).toBe('copy_clicked');
     expect(insertedDoc.platform).toBe('x');
     expect(insertedDoc.postUrl).toBe('https://x.com/example/status/1');
+    expect(insertedDoc.userId).toBe('user-1');
     expect(typeof insertedDoc.id).toBe('string');
     expect(typeof insertedDoc.createdAt).toBe('string');
   });
@@ -85,7 +86,7 @@ describe('AnalyticsService', () => {
     const mongoService = {
       db: jest.fn().mockResolvedValue(dbMock),
     } as unknown as MongoService;
-    const service = new AnalyticsService(mongoService);
+    const service = new AnalyticsService(mongoService, null as never);
 
     await expect(service.getSummary()).resolves.toEqual({
       totalEvents: 3,
