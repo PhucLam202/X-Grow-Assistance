@@ -44,8 +44,6 @@ export class GenerateReplyPackDto {
   @IsUrl({ require_tld: true }, { message: 'postUrl must be a valid URL' })
   postUrl?: string;
 
-
-
   @IsIn(TARGET_COMMENT_LANGUAGES)
   targetCommentLanguage: TargetCommentLanguage;
 

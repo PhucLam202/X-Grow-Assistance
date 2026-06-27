@@ -11,7 +11,10 @@ export class MongoService implements OnModuleDestroy {
 
   async db(): Promise<Db> {
     const client = await this.getClient();
-    const dbName = this.configService.get<string>('MONGODB_DB_NAME', 'x_comment_assistant');
+    const dbName = this.configService.get<string>(
+      'MONGODB_DB_NAME',
+      'x_comment_assistant',
+    );
     return client.db(dbName);
   }
 

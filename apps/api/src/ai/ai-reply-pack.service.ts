@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ReplyPack } from '../reply-pack/types/reply-pack.types';
 import { AiConfigService } from './ai.config';
 import { AiProviderRegistry } from './ai-provider.registry';
-import { AiReplyPackInput } from './ai.types';
+import { AiReplyPackInput, OpenAiCompatibleResponse } from './ai.types';
 import { ReplyPackJsonParser } from './parsers/reply-pack-json.parser';
 
 @Injectable()
@@ -13,8 +13,31 @@ export class AiReplyPackService {
     private readonly parser: ReplyPackJsonParser,
   ) {}
 
+  async generateText(systemPrompt: string, userPrompt: string): Promise<string> {
+    const { apiUrl, apiKey, model } = this.aiConfig.getTextProviderEndpoint();
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 2000,
+      }),
+    });
+    if (!response.ok)
+      throw new Error(`generateText: provider responded ${response.status}`);
+    const text = ((await response.json()) as OpenAiCompatibleResponse).choices?.[0]?.message?.content;
+    if (!text) throw new Error('generateText: empty response from provider');
+    return text;
+  }
+
   async generateReplyPack(input: AiReplyPackInput): Promise<ReplyPack> {
-    const provider = this.providerRegistry.get(this.aiConfig.getTextProviderName());
+    const provider = this.providerRegistry.get(
+      this.aiConfig.getTextProviderName(),
+    );
     const content = await provider.generateReplyPack(input);
     const parsed = this.parser.parse(content);
 
@@ -29,7 +52,9 @@ export class AiReplyPackService {
       sentiment: parsed.sentiment,
       commentStrategy: parsed.commentStrategy,
       suggestions: parsed.suggestions
-        .sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0))
+        .sort(
+          (left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0),
+        )
         .slice(0, input.dto.maxSuggestions)
         .map((suggestion) => ({
           ...suggestion,

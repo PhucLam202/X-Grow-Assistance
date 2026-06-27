@@ -11,6 +11,7 @@ import { ClaudeProvider } from './providers/claude.provider';
 import { DeepSeekProvider } from './providers/deepseek.provider';
 import { GeminiProvider } from './providers/gemini.provider';
 import { OpenAiProvider } from './providers/openai.provider';
+import { OpenRouterProvider } from './providers/openrouter.provider';
 
 @Module({
   providers: [
@@ -26,6 +27,7 @@ import { OpenAiProvider } from './providers/openai.provider';
     DeepSeekProvider,
     GeminiProvider,
     ClaudeProvider,
+    OpenRouterProvider,
   ],
   exports: [AiReplyPackService, AiVisionService],
 })

@@ -2,45 +2,127 @@ import type {
   AnalyzeVisionRequest,
   FeedSnapshot,
   FeedSnapshotSubmitResponse,
-  GenerateFromVisionContextRequest,
-  DetectPublishedCommentRequest,
+  CommentHistoryResponse,
   OpportunityPostScoreResponse,
-  GenerateReplyPackRequest,
-  CommentOverview,
+  HarnessDriverInput,
+  HarnessState,
   LogCommentActionRequest,
   OpportunitySnapshotScoreResponse,
-  ReplyPack,
   SaveFullContextRequest,
   SaveFullContextResponse,
   UsageEventRequest,
   VisionContext,
-  VisionReplyPack,
 } from "./types";
+import { clearAuthSession, getAuthSession, type AuthSession } from "./auth";
+import { API_BASE_URL } from "./config";
 
-const API_BASE_URL = "http://127.0.0.1:3001/api/v1";
+type ApiRequestInit = RequestInit & {
+  skipAuth?: boolean;
+};
 
-export async function generateReplyPack(
-  request: GenerateReplyPackRequest,
-): Promise<ReplyPack> {
-  const response = await fetch(`${API_BASE_URL}/generate-reply-pack`, {
-    method: "POST",
+async function apiFetch(path: string, init: ApiRequestInit = {}): Promise<Response> {
+  const { skipAuth, headers, ...requestInit } = init;
+  const session = skipAuth ? null : await getAuthSession();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...requestInit,
     headers: {
-      "Content-Type": "application/json",
+      ...(headers ?? {}),
+      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     },
-    body: JSON.stringify(request),
   });
 
-  if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
+  if (response.status === 401 && !skipAuth) {
+    await clearAuthSession();
   }
 
-  return response.json() as Promise<ReplyPack>;
+  return response;
 }
 
-export async function analyzeVision(
-  request: AnalyzeVisionRequest,
-): Promise<VisionReplyPack> {
-  const response = await fetch(`${API_BASE_URL}/analyze/vision`, {
+async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: string | string[]; error?: string };
+    if (Array.isArray(body.message) && body.message.length > 0) return body.message.join("; ");
+    if (typeof body.message === "string" && body.message.trim()) return body.message;
+    if (typeof body.error === "string" && body.error.trim()) return body.error;
+  } catch {
+    // Some endpoints may return an empty or non-JSON error response.
+  }
+
+  return fallback;
+}
+
+export async function login(request: {
+  email?: string;
+  phone?: string;
+  password: string;
+}): Promise<AuthSession> {
+  const response = await apiFetch("/auth/login", {
+    method: "POST",
+    skipAuth: true,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await getApiErrorMessage(response, `Login failed with status ${response.status}`),
+    );
+  }
+
+  return response.json() as Promise<AuthSession>;
+}
+
+export async function register(request: {
+  email?: string;
+  phone?: string;
+  name?: string;
+  password: string;
+}): Promise<AuthSession> {
+  const response = await apiFetch("/auth/register", {
+    method: "POST",
+    skipAuth: true,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      await getApiErrorMessage(response, `Register failed with status ${response.status}`),
+    );
+  }
+
+  return response.json() as Promise<AuthSession>;
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await apiFetch("/auth/logout", { method: "POST" });
+  } finally {
+    await clearAuthSession();
+  }
+}
+
+export async function getMe(): Promise<AuthSession["user"]> {
+  const response = await apiFetch("/auth/me");
+
+  if (!response.ok) {
+    throw new Error(
+      await getApiErrorMessage(response, `Auth check failed with status ${response.status}`),
+    );
+  }
+
+  const result = (await response.json()) as { user: AuthSession["user"] };
+  return result.user;
+}
+
+export async function runCommentHarness(
+  request: HarnessDriverInput,
+): Promise<HarnessState> {
+  const response = await apiFetch(`/comment-intelligence/harness/run`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -49,16 +131,18 @@ export async function analyzeVision(
   });
 
   if (!response.ok) {
-    throw new Error(`Vision API request failed with status ${response.status}`);
+    throw new Error(
+      await getApiErrorMessage(response, `Harness request failed with status ${response.status}`),
+    );
   }
 
-  return response.json() as Promise<VisionReplyPack>;
+  return response.json() as Promise<HarnessState>;
 }
 
 export async function analyzeVisionContext(
   request: AnalyzeVisionRequest,
 ): Promise<VisionContext> {
-  const response = await fetch(`${API_BASE_URL}/analyze/vision/context`, {
+  const response = await apiFetch(`/analyze/vision/context`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -75,50 +159,9 @@ export async function analyzeVisionContext(
   return response.json() as Promise<VisionContext>;
 }
 
-export async function generateFromVisionContext(
-  request: GenerateFromVisionContextRequest,
-): Promise<VisionReplyPack> {
-  const sanitizedRequest = {
-    post: request.post,
-    visionContext: {
-      detectedLanguage: request.visionContext.detectedLanguage,
-      translationLanguage: request.visionContext.translationLanguage,
-      translation: request.visionContext.translation,
-      summary: request.visionContext.summary,
-      context: request.visionContext.context,
-      theme: request.visionContext.theme,
-      topic: request.visionContext.topic,
-      sentiment: request.visionContext.sentiment,
-      commentStrategy: request.visionContext.commentStrategy,
-      imageAnalysis: request.visionContext.imageAnalysis,
-      combinedContext: request.visionContext.combinedContext,
-    },
-    options: request.options,
-  };
-
-  const response = await fetch(
-    `${API_BASE_URL}/analyze/vision/context/comments`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(sanitizedRequest),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(
-      `Vision context comments API request failed with status ${response.status}`,
-    );
-  }
-
-  return response.json() as Promise<VisionReplyPack>;
-}
-
 export async function trackUsageEvent(event: UsageEventRequest): Promise<void> {
   try {
-    await fetch(`${API_BASE_URL}/analytics/events`, {
+    await apiFetch(`/analytics/events`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -133,7 +176,7 @@ export async function trackUsageEvent(event: UsageEventRequest): Promise<void> {
 export async function saveFullContext(
   request: SaveFullContextRequest,
 ): Promise<SaveFullContextResponse> {
-  const response = await fetch(`${API_BASE_URL}/analytics/full-context`, {
+  const response = await apiFetch(`/analytics/full-context`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -151,7 +194,7 @@ export async function saveFullContext(
 export async function logCommentAction(
   request: LogCommentActionRequest,
 ): Promise<{ success: boolean; actionId: string }> {
-  const response = await fetch(`${API_BASE_URL}/analytics/comment-actions`, {
+  const response = await apiFetch(`/analytics/comment-actions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -166,37 +209,16 @@ export async function logCommentAction(
   return response.json() as Promise<{ success: boolean; actionId: string }>;
 }
 
-export async function detectPublishedComment(
-  request: DetectPublishedCommentRequest,
-): Promise<{ success: boolean; publishedCommentId: string; commentTweetId: string | null }> {
-  const response = await fetch(`${API_BASE_URL}/analytics/published-comments/detect`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(request),
-  });
+export async function getCommentHistory(limit = 20): Promise<CommentHistoryResponse> {
+  const response = await apiFetch(`/analytics/comment-history?limit=${limit}`);
 
   if (!response.ok) {
-    throw new Error(`Detect published comment failed with status ${response.status}`);
+    throw new Error(
+      await getApiErrorMessage(response, `Comment history failed with status ${response.status}`),
+    );
   }
 
-  return response.json() as Promise<{
-    success: boolean;
-    publishedCommentId: string;
-    commentTweetId: string | null;
-  }>;
-}
-
-export async function getCommentOverview(userId?: string): Promise<CommentOverview> {
-  const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-  const response = await fetch(`${API_BASE_URL}/analytics/comment-overview${params}`);
-
-  if (!response.ok) {
-    throw new Error(`Comment overview failed with status ${response.status}`);
-  }
-
-  return response.json() as Promise<CommentOverview>;
+  return response.json() as Promise<CommentHistoryResponse>;
 }
 
 export async function submitFeedSnapshot(
@@ -214,7 +236,7 @@ export async function submitFeedSnapshot(
     })),
   };
 
-  const response = await fetch(`${API_BASE_URL}/feed/snapshot`, {
+  const response = await apiFetch(`/feed/snapshot`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -234,7 +256,7 @@ export async function submitFeedSnapshot(
 export async function scoreFeedSnapshot(
   snapshotId: string,
 ): Promise<OpportunitySnapshotScoreResponse> {
-  const response = await fetch(`${API_BASE_URL}/opportunities/score-snapshot`, {
+  const response = await apiFetch(`/opportunities/score-snapshot`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -276,7 +298,7 @@ export async function scorePost(request: {
     needsVisionAnalysis?: boolean;
   };
 }): Promise<OpportunityPostScoreResponse> {
-  const response = await fetch(`${API_BASE_URL}/opportunities/score-post`, {
+  const response = await apiFetch(`/opportunities/score-post`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

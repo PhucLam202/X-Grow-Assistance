@@ -58,7 +58,9 @@ export class VisionAnalysisJsonParser {
     const parsed = JSON.parse(json) as Partial<AiVisionContextPayload>;
 
     const imageAnalysis = this.normalizeVisionAnalysis(parsed.imageAnalysis);
-    const combinedContext = this.normalizeCombinedContext(parsed.combinedContext);
+    const combinedContext = this.normalizeCombinedContext(
+      parsed.combinedContext,
+    );
 
     if (
       typeof parsed.translation !== 'string' ||
@@ -97,7 +99,8 @@ export class VisionAnalysisJsonParser {
       typeof analysis.visualTone === 'string' &&
       Array.isArray(analysis.importantObjects) &&
       analysis.importantObjects.every((item) => typeof item === 'string') &&
-      (analysis.uncertainty === undefined || typeof analysis.uncertainty === 'string')
+      (analysis.uncertainty === undefined ||
+        typeof analysis.uncertainty === 'string')
     );
   }
 
@@ -151,7 +154,9 @@ export class VisionAnalysisJsonParser {
     return value;
   }
 
-  private normalizeSuggestion(suggestion: Partial<CommentSuggestion>): CommentSuggestion {
+  private normalizeSuggestion(
+    suggestion: Partial<CommentSuggestion>,
+  ): CommentSuggestion {
     if (
       typeof suggestion.text !== 'string' ||
       typeof suggestion.meaningVi !== 'string' ||
@@ -170,7 +175,11 @@ export class VisionAnalysisJsonParser {
           ? suggestion.risk
           : 'low',
       whyItWorks: suggestion.whyItWorks,
-      score: this.normalizeScore(suggestion.score, suggestion.text, suggestion.whyItWorks),
+      score: this.normalizeScore(
+        suggestion.score,
+        suggestion.text,
+        suggestion.whyItWorks,
+      ),
     };
   }
 
@@ -186,9 +195,16 @@ export class VisionAnalysisJsonParser {
     const visibility = this.clampScore(raw.visibility, fallback.visibility);
     const specificity = this.clampScore(raw.specificity, fallback.specificity);
     const native = this.clampScore(raw.native, fallback.native);
-    const engagementHook = this.clampScore(raw.engagementHook, fallback.engagementHook);
+    const engagementHook = this.clampScore(
+      raw.engagementHook,
+      fallback.engagementHook,
+    );
     const calculatedTotal = this.clampScore(
-      postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+      postFit * 0.25 +
+        visibility * 0.25 +
+        specificity * 0.2 +
+        native * 0.15 +
+        engagementHook * 0.15,
       fallback.total,
     );
 
@@ -218,7 +234,11 @@ export class VisionAnalysisJsonParser {
     const native = length <= 220 ? 78 : 58;
     const engagementHook = hasHook ? 76 : 58;
     const total = this.clampScore(
-      postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+      postFit * 0.25 +
+        visibility * 0.25 +
+        specificity * 0.2 +
+        native * 0.15 +
+        engagementHook * 0.15,
       60,
     );
 
@@ -229,7 +249,9 @@ export class VisionAnalysisJsonParser {
       specificity,
       native,
       engagementHook,
-      whyVisible: whyItWorks || 'Balanced fallback score based on specificity, naturalness, and hook strength.',
+      whyVisible:
+        whyItWorks ||
+        'Balanced fallback score based on specificity, naturalness, and hook strength.',
     };
   }
 

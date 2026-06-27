@@ -14,10 +14,14 @@ export class AiVisionService {
   ) {}
 
   async analyzeVision(input: AiVisionInput): Promise<VisionReplyPack> {
-    const provider = this.providerRegistry.get(this.aiConfig.getVisionProviderName());
+    const provider = this.providerRegistry.get(
+      this.aiConfig.getVisionProviderName(),
+    );
 
     if (!provider.analyzeVision) {
-      throw new Error(`AI provider ${provider.name} does not support vision analysis`);
+      throw new Error(
+        `AI provider ${provider.name} does not support vision analysis`,
+      );
     }
 
     const content = await provider.analyzeVision(input);
@@ -37,7 +41,9 @@ export class AiVisionService {
       imageAnalysis: parsed.imageAnalysis,
       combinedContext: parsed.combinedContext,
       suggestions: parsed.suggestions
-        .sort((left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0))
+        .sort(
+          (left, right) => (right.score?.total ?? 0) - (left.score?.total ?? 0),
+        )
         .slice(0, input.dto.options.maxSuggestions)
         .map((suggestion) => ({
           ...suggestion,
@@ -48,11 +54,16 @@ export class AiVisionService {
   }
 
   async analyzeVisionContext(input: AiVisionInput): Promise<VisionContext> {
-    const provider = this.providerRegistry.get(this.aiConfig.getVisionProviderName());
+    const provider = this.providerRegistry.get(
+      this.aiConfig.getVisionProviderName(),
+    );
 
-    const analyzeContext = provider.analyzeVisionContext ?? provider.analyzeVision;
+    const analyzeContext =
+      provider.analyzeVisionContext ?? provider.analyzeVision;
     if (!analyzeContext) {
-      throw new Error(`AI provider ${provider.name} does not support vision context analysis`);
+      throw new Error(
+        `AI provider ${provider.name} does not support vision context analysis`,
+      );
     }
 
     const content = await analyzeContext.call(provider, input);

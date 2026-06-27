@@ -4,7 +4,10 @@ import { AiVisionService } from '../ai/ai-vision.service';
 import { LanguageDetectorService } from '../common/language/language-detector.service';
 import { ImageFetchService } from '../image/image-fetch.service';
 import { GenerateReplyPackDto } from '../reply-pack/dto/generate-reply-pack.dto';
-import { buildContextualPostText, getTextForLanguageDetection } from '../reply-pack/post-context.builder';
+import {
+  buildContextualPostText,
+  getTextForLanguageDetection,
+} from '../reply-pack/post-context.builder';
 import { ReplyPack } from '../reply-pack/types/reply-pack.types';
 import { AnalyzeVisionDto } from './dto/analyze-vision.dto';
 import { GenerateFromVisionContextDto } from './dto/generate-from-vision-context.dto';
@@ -105,11 +108,18 @@ export class VisionAnalyzeService {
         translationLanguage,
       );
 
-      return this.toFallbackVisionContext(fallback, error, detectedLanguage, translationLanguage);
+      return this.toFallbackVisionContext(
+        fallback,
+        error,
+        detectedLanguage,
+        translationLanguage,
+      );
     }
   }
 
-  async generateFromContext(dto: GenerateFromVisionContextDto): Promise<VisionReplyPack> {
+  async generateFromContext(
+    dto: GenerateFromVisionContextDto,
+  ): Promise<VisionReplyPack> {
     const detectedLanguage = this.languageDetector.detect(
       getTextForLanguageDetection(dto.post.text, dto.postContext),
     );
@@ -119,7 +129,9 @@ export class VisionAnalyzeService {
         : dto.options.targetCommentLanguage;
     const translationLanguage = dto.options.explanationLanguage;
     const contextText = this.buildPostTextWithVisionContext(dto);
-    const replyPackDto: GenerateReplyPackDto & { translationLanguage: 'vi' | 'en' } = {
+    const replyPackDto: GenerateReplyPackDto & {
+      translationLanguage: 'vi' | 'en';
+    } = {
       platform: dto.post.platform,
       postText: contextText,
       authorName: dto.post.authorName,
@@ -152,7 +164,9 @@ export class VisionAnalyzeService {
     targetLanguage: string,
     translationLanguage: 'vi' | 'en',
   ): Promise<ReplyPack> {
-    const replyPackDto: GenerateReplyPackDto & { translationLanguage: 'vi' | 'en' } = {
+    const replyPackDto: GenerateReplyPackDto & {
+      translationLanguage: 'vi' | 'en';
+    } = {
       platform: dto.post.platform,
       postText: buildContextualPostText(dto.post.text, dto.postContext),
       authorName: dto.post.authorName,
@@ -185,9 +199,13 @@ export class VisionAnalyzeService {
         sentiment: replyPack.sentiment,
         explanation: replyPack.context,
         commentStrategy: replyPack.commentStrategy,
-        avoid: ['Image could not be analyzed. Do not reference visual details.'],
+        avoid: [
+          'Image could not be analyzed. Do not reference visual details.',
+        ],
       },
-      imageErrors: [error instanceof Error ? error.message : 'Image analysis failed'],
+      imageErrors: [
+        error instanceof Error ? error.message : 'Image analysis failed',
+      ],
     };
   }
 
@@ -214,15 +232,24 @@ export class VisionAnalyzeService {
         sentiment: replyPack.sentiment,
         explanation: replyPack.context,
         commentStrategy: replyPack.commentStrategy,
-        avoid: ['Image could not be analyzed. Do not reference visual details.'],
+        avoid: [
+          'Image could not be analyzed. Do not reference visual details.',
+        ],
       },
-      imageErrors: [error instanceof Error ? error.message : 'Image analysis failed'],
+      imageErrors: [
+        error instanceof Error ? error.message : 'Image analysis failed',
+      ],
     };
   }
 
-  private buildPostTextWithVisionContext(dto: GenerateFromVisionContextDto): string {
+  private buildPostTextWithVisionContext(
+    dto: GenerateFromVisionContextDto,
+  ): string {
     const imageAnalysis = dto.visionContext.imageAnalysis;
-    const structuredPostContext = buildContextualPostText(dto.post.text, dto.postContext);
+    const structuredPostContext = buildContextualPostText(
+      dto.post.text,
+      dto.postContext,
+    );
     return [
       structuredPostContext,
       '',

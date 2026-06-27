@@ -1,5 +1,8 @@
 import { DetectedLanguage } from '../../common/language/language.types';
-import { CommentSuggestion, ReplyPack } from '../../reply-pack/types/reply-pack.types';
+import {
+  CommentSuggestion,
+  ReplyPack,
+} from '../../reply-pack/types/reply-pack.types';
 
 export type VisionMediaInput = {
   type: 'image';

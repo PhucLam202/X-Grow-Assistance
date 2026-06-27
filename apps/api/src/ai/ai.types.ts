@@ -4,12 +4,19 @@ import { GenerateReplyPackDto } from '../reply-pack/dto/generate-reply-pack.dto'
 import { CommentSuggestion } from '../reply-pack/types/reply-pack.types';
 import { AnalyzeVisionDto } from '../vision/dto/analyze-vision.dto';
 
-export type AiProviderName = 'openai' | 'deepseek' | 'gemini' | 'claude';
+export type AiProviderName = 'openai' | 'deepseek' | 'gemini' | 'claude' | 'openrouter';
+
+export type UserMemory = {
+  preferredTones: string[];
+  blockedPhrases: string[];
+  styleNotes?: string;
+};
 
 export type AiReplyPackInput = {
   dto: GenerateReplyPackDto & { translationLanguage: 'vi' | 'en' };
   detectedLanguage: DetectedLanguage;
   targetLanguage: string;
+  userMemory?: UserMemory;
 };
 
 export type AiReplyPackPayload = {

@@ -23,7 +23,11 @@ function fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
   const native = length <= 220 ? 78 : 58;
   const engagementHook = hasHook ? 76 : 58;
   const total = clampScore(
-    postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+    postFit * 0.25 +
+      visibility * 0.25 +
+      specificity * 0.2 +
+      native * 0.15 +
+      engagementHook * 0.15,
     60,
   );
 
@@ -34,7 +38,9 @@ function fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
     specificity,
     native,
     engagementHook,
-    whyVisible: whyItWorks || 'Balanced fallback score based on specificity, naturalness, and hook strength.',
+    whyVisible:
+      whyItWorks ||
+      'Balanced fallback score based on specificity, naturalness, and hook strength.',
   };
 }
 
@@ -50,9 +56,16 @@ function normalizeScore(
   const visibility = clampScore(raw.visibility, fallback.visibility);
   const specificity = clampScore(raw.specificity, fallback.specificity);
   const native = clampScore(raw.native, fallback.native);
-  const engagementHook = clampScore(raw.engagementHook, fallback.engagementHook);
+  const engagementHook = clampScore(
+    raw.engagementHook,
+    fallback.engagementHook,
+  );
   const calculatedTotal = clampScore(
-    postFit * 0.25 + visibility * 0.25 + specificity * 0.2 + native * 0.15 + engagementHook * 0.15,
+    postFit * 0.25 +
+      visibility * 0.25 +
+      specificity * 0.2 +
+      native * 0.15 +
+      engagementHook * 0.15,
     fallback.total,
   );
 

@@ -158,6 +158,10 @@ export type DetectCurrentPostMessage = {
   type: "XCA_DETECT_CURRENT_POST";
 };
 
+export type PingDetectorMessage = {
+  type: "XCA_PING";
+};
+
 export type ScanVisibleFeedMessage = {
   type: "XCA_SCAN_VISIBLE_FEED";
 };
@@ -186,6 +190,7 @@ export type TrackPendingCommentMessage = {
 export type SelectedPostResponse = {
   post?: ExtractedPost;
   postContext?: ExtractedPostContext;
+  ok?: boolean;
   error?: string;
 };
 
@@ -211,6 +216,7 @@ export type ExtensionMessage =
   | CachePostContextMessage
   | GetSelectedPostMessage
   | DetectCurrentPostMessage
+  | PingDetectorMessage
   | ScanVisibleFeedMessage
   | RenderPostOverlayMessage
   | TrackPendingCommentMessage;
@@ -342,6 +348,108 @@ export type VisionContext = {
   imageErrors?: string[];
 };
 
+export type HarnessCommentDepth = "short" | "medium" | "deep";
+export type HarnessStatus = "started" | "completed" | "failed" | "skipped";
+export type HarnessToolStatus = "success" | "skipped" | "failed";
+
+export type HarnessPostSegment = {
+  text?: string;
+  authorName?: string;
+  username?: string;
+  language?: string;
+  url?: string;
+};
+
+export type HarnessMediaContext = {
+  type: "image" | "video_thumbnail" | "gif" | "unknown";
+  altText?: string;
+  ocrText?: string;
+};
+
+export type HarnessAuthorContinuation = HarnessPostSegment & {
+  orderIndex: number;
+};
+
+export type HarnessDriverInput = {
+  platform: "x";
+  mainPost: HarnessPostSegment;
+  media?: HarnessMediaContext[];
+  quotedPost?: HarnessPostSegment;
+  repostedPost?: HarnessPostSegment;
+  parentPost?: HarnessPostSegment;
+  authorContinuations?: HarnessAuthorContinuation[];
+  availableReplies?: HarnessAuthorContinuation[];
+  extraction: {
+    confidence: number;
+    warnings: string[];
+    missingFields: string[];
+  };
+  contextState?: {
+    isExpanded: boolean;
+    expansionSources: string[];
+    needsMoreContext?: boolean;
+  };
+};
+
+export type HarnessDriverDecision = {
+  zone: string;
+  intent: string;
+  shouldComment: boolean;
+  recommendedLanguage: string;
+  recommendedTone: string;
+  recommendedDepth: HarnessCommentDepth;
+  commentStrategy: string;
+  avoid: string[];
+  requiredTools: string[];
+  needsContextExpansion: boolean;
+  contextReasons: string[];
+  decisionStage: "initial" | "final";
+  confidence: number;
+  warnings: string[];
+};
+
+export type HarnessGeneratedComment = {
+  text: string;
+  label: string;
+  style: "best_pick" | "safe" | "funny" | "question" | "value_add";
+  score: number;
+  reason: string;
+  risk: RiskLevel;
+};
+
+export type HarnessComposerOutput = {
+  bestPick: HarnessGeneratedComment | null;
+  alternatives: HarnessGeneratedComment[];
+  warnings: string[];
+};
+
+export type HarnessToolCallRecord = {
+  toolName: string;
+  status: HarnessToolStatus;
+  critical: boolean;
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  errorMessage?: string;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+};
+
+export type HarnessState = {
+  runId: string;
+  status: HarnessStatus;
+  input: HarnessDriverInput;
+  enrichedInput: HarnessDriverInput;
+  initialDecision?: HarnessDriverDecision;
+  finalDecision?: HarnessDriverDecision;
+  composerOutput?: HarnessComposerOutput;
+  toolCalls: HarnessToolCallRecord[];
+  warnings: string[];
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+};
+
 export type GenerateReplyPackRequest = {
   platform: "x";
   postText: string;
@@ -423,6 +531,53 @@ export type HistoryItem = {
   targetCommentLanguage: TargetCommentLanguage;
   replyPack: ReplyPack;
   createdAt: string;
+};
+
+export type CommentHistoryMedia = {
+  mediaType?: string;
+  mediaUrl?: string;
+  altText?: string;
+  ocrText?: string;
+};
+
+export type CommentHistoryItem = {
+  suggestionId: string;
+  postId: string;
+  analysisId?: string;
+  postType?: FullContextPostType;
+  postUrl?: string;
+  tweetId?: string;
+  postText?: string;
+  authorName?: string;
+  username?: string;
+  media: CommentHistoryMedia[];
+  text: string;
+  language?: string;
+  tone?: string;
+  meaningVi?: string;
+  risk?: RiskLevel;
+  optimizationScore?: number;
+  optimizationReason?: string[];
+  avoidReason?: string[];
+  used: boolean;
+  actions: Array<Record<string, unknown>>;
+  analysis?: {
+    mode?: string;
+    textSummary?: string;
+    imageSummary?: string;
+    combinedContext?: string;
+    topic?: string;
+    tone?: string;
+    intent?: string;
+    commentStrategy?: string;
+    warnings?: string[];
+  };
+  createdAt: string;
+};
+
+export type CommentHistoryResponse = {
+  userId: string;
+  items: CommentHistoryItem[];
 };
 
 export type FullContextPostType =

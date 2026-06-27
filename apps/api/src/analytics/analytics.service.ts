@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { Collection, Db, ObjectId } from 'mongodb';
+import { AiReplyPackService } from '../ai/ai-reply-pack.service';
 import { MongoService } from '../mongo/mongo.service';
 import { DetectPublishedCommentDto } from './dto/detect-published-comment.dto';
 import { LogCommentActionDto } from './dto/log-comment-action.dto';
@@ -19,13 +20,17 @@ export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
   private indexesPromise: Promise<void> | null = null;
 
-  constructor(private readonly mongoService: MongoService) {}
+  constructor(
+    private readonly mongoService: MongoService,
+    private readonly aiReplyPackService: AiReplyPackService,
+  ) {}
 
-  async track(dto: TrackUsageEventDto): Promise<{ ok: true }> {
+  async track(dto: TrackUsageEventDto, userId: string): Promise<{ ok: true }> {
     const db = await this.mongoService.db();
     await db.collection<UsageEventDocument>(USAGE_EVENTS_COLLECTION).insertOne({
       id: randomUUID(),
       createdAt: new Date().toISOString(),
+      userId,
       ...dto,
     });
 
@@ -60,7 +65,7 @@ export class AnalyticsService {
   async saveFullContext(dto: SaveFullContextDto) {
     const db = await this.mongoService.db();
     await this.ensureDataIndexes();
-    const userId = dto.userId ?? 'local-user';
+    const userId = this.requireUserId(dto.userId);
     const now = new Date();
     const platform = dto.platform ?? 'x';
     const normalizedPostUrl = this.normalizePostUrl(dto.postUrl);
@@ -71,7 +76,9 @@ export class AnalyticsService {
       tweetId,
       username: dto.username,
       text: dto.text,
-      firstMediaUrl: this.toStringValue(dto.media?.[0]?.mediaUrl ?? dto.media?.[0]?.url),
+      firstMediaUrl: this.toStringValue(
+        dto.media?.[0]?.mediaUrl ?? dto.media?.[0]?.url,
+      ),
     });
     const postQuery = tweetId
       ? { userId, platform, tweetId }
@@ -80,7 +87,8 @@ export class AnalyticsService {
       `DB saveFullContext:start user=${userId} platform=${platform} key=${tweetId ? `tweet:${tweetId}` : `hash:${contentHash.slice(0, 12)}`}`,
     );
     const existingPost = await db.collection('posts').findOne(postQuery);
-    const postId = existingPost?._id instanceof ObjectId ? existingPost._id : new ObjectId();
+    const postId =
+      existingPost?._id instanceof ObjectId ? existingPost._id : new ObjectId();
     const analysisId = dto.analysis ? new ObjectId() : undefined;
 
     const postSet: Record<string, unknown> = {
@@ -123,21 +131,21 @@ export class AnalyticsService {
     const mediaDocs = (dto.media ?? []).map((mediaItem) => {
       const mediaUrl = this.toStringValue(mediaItem.mediaUrl ?? mediaItem.url);
       return {
-      _id: new ObjectId(),
-      userId,
-      postId,
-      mediaType: this.toStringValue(
-        mediaItem.mediaType ?? mediaItem.type,
-        'unknown',
-      ),
-      mediaUrl,
-      normalizedMediaUrl: this.normalizeMediaUrl(mediaUrl),
-      altText: this.toStringValue(mediaItem.altText),
-      ocrText: this.toStringValue(mediaItem.ocrText),
-      metadataJson: mediaItem,
-      createdAt: now,
-      updatedAt: now,
-    };
+        _id: new ObjectId(),
+        userId,
+        postId,
+        mediaType: this.toStringValue(
+          mediaItem.mediaType ?? mediaItem.type,
+          'unknown',
+        ),
+        mediaUrl,
+        normalizedMediaUrl: this.normalizeMediaUrl(mediaUrl),
+        altText: this.toStringValue(mediaItem.altText),
+        ocrText: this.toStringValue(mediaItem.ocrText),
+        metadataJson: mediaItem,
+        createdAt: now,
+        updatedAt: now,
+      };
     });
 
     for (const mediaDoc of mediaDocs) {
@@ -177,11 +185,19 @@ export class AnalyticsService {
       });
       const role = this.toStringValue(relatedPost.role);
       const tweetId = this.toStringValue(relatedPost.tweetId);
-      const postUrl = this.normalizePostUrl(this.toStringValue(relatedPost.postUrl));
+      const postUrl = this.normalizePostUrl(
+        this.toStringValue(relatedPost.postUrl),
+      );
       if (role) relatedPostIds.set(`role:${role}`, relatedPostId);
       if (tweetId) relatedPostIds.set(`tweet:${tweetId}`, relatedPostId);
       if (postUrl) relatedPostIds.set(`url:${postUrl}`, relatedPostId);
-      await this.upsertPostMedia(db, userId, relatedPostId, this.toArrayValue(relatedPost.media), now);
+      await this.upsertPostMedia(
+        db,
+        userId,
+        relatedPostId,
+        this.toArrayValue(relatedPost.media),
+        now,
+      );
     }
     if ((dto.relatedPosts ?? []).length > 0) {
       this.logger.log(
@@ -193,11 +209,17 @@ export class AnalyticsService {
       const relationType = this.toStringValue(relation.relationType, 'context');
       const role = this.toStringValue(relation.role);
       const targetTweetId = this.toStringValue(relation.targetTweetId);
-      const targetPostUrl = this.normalizePostUrl(this.toStringValue(relation.targetPostUrl));
+      const targetPostUrl = this.normalizePostUrl(
+        this.toStringValue(relation.targetPostUrl),
+      );
       const targetPostId =
         (role ? relatedPostIds.get(`role:${role}`) : undefined) ??
-        (targetTweetId ? relatedPostIds.get(`tweet:${targetTweetId}`) : undefined) ??
-        (targetPostUrl ? relatedPostIds.get(`url:${targetPostUrl}`) : undefined);
+        (targetTweetId
+          ? relatedPostIds.get(`tweet:${targetTweetId}`)
+          : undefined) ??
+        (targetPostUrl
+          ? relatedPostIds.get(`url:${targetPostUrl}`)
+          : undefined);
 
       if (!targetPostId || !relationType) continue;
       await db.collection('post_relations').updateOne(
@@ -296,7 +318,7 @@ export class AnalyticsService {
   async logCommentAction(dto: LogCommentActionDto) {
     const db = await this.mongoService.db();
     await this.ensureDataIndexes();
-    const userId = dto.userId ?? 'local-user';
+    const userId = this.requireUserId(dto.userId);
     const now = new Date();
     const actionId = new ObjectId();
     const postId = this.toObjectId(dto.postId);
@@ -321,9 +343,14 @@ export class AnalyticsService {
         { _id: suggestionId, userId },
         {
           $set: {
-            used: ['copied', 'inserted', 'sent_manually', 'sent_detected', 'mark_as_sent', 'saved'].includes(
-              dto.actionType,
-            ),
+            used: [
+              'copied',
+              'inserted',
+              'sent_manually',
+              'sent_detected',
+              'mark_as_sent',
+              'saved',
+            ].includes(dto.actionType),
             ...(timestampField ? { [timestampField]: now } : {}),
           },
         },
@@ -331,9 +358,15 @@ export class AnalyticsService {
     }
 
     if (
-      ['copied', 'inserted', 'edited', 'sent_manually', 'sent_detected', 'mark_as_sent', 'saved'].includes(
-        dto.actionType,
-      ) &&
+      [
+        'copied',
+        'inserted',
+        'edited',
+        'sent_manually',
+        'sent_detected',
+        'mark_as_sent',
+        'saved',
+      ].includes(dto.actionType) &&
       dto.commentText
     ) {
       await this.storeUsedCommentMemory(userId, dto, actionId, now);
@@ -348,13 +381,14 @@ export class AnalyticsService {
   async detectPublishedComment(dto: DetectPublishedCommentDto) {
     const db = await this.mongoService.db();
     await this.ensureDataIndexes();
-    const userId = dto.userId ?? 'local-user';
+    const userId = this.requireUserId(dto.userId);
     const now = new Date();
     const postId = this.toObjectId(dto.postId);
     const suggestionId = dto.suggestionId
       ? this.toObjectId(dto.suggestionId)
       : undefined;
-    const commentTweetId = dto.commentTweetId ?? this.extractTweetId(dto.commentUrl);
+    const commentTweetId =
+      dto.commentTweetId ?? this.extractTweetId(dto.commentUrl);
     const publishedCommentId = new ObjectId();
     const query = commentTweetId
       ? { userId, commentTweetId }
@@ -399,7 +433,8 @@ export class AnalyticsService {
       userId,
       postId: dto.postId,
       suggestionId: dto.suggestionId,
-      actionType: dto.detectedBy === 'user_confirmed' ? 'mark_as_sent' : 'sent_detected',
+      actionType:
+        dto.detectedBy === 'user_confirmed' ? 'mark_as_sent' : 'sent_detected',
       commentText: dto.commentText,
       metadata: {
         commentUrl: dto.commentUrl,
@@ -417,7 +452,7 @@ export class AnalyticsService {
     };
   }
 
-  async getCommentOverview(userId = 'local-user') {
+  async getCommentOverview(userId: string) {
     const db = await this.mongoService.db();
     const [
       postsAnalyzed,
@@ -459,7 +494,7 @@ export class AnalyticsService {
     limit?: string;
   }) {
     const db = await this.mongoService.db();
-    const userId = filters.userId ?? 'local-user';
+    const userId = this.requireUserId(filters.userId);
     const limit = Math.min(Number(filters.limit ?? 50), 100);
     const suggestionMatch: Record<string, unknown> = { userId };
 
@@ -482,6 +517,24 @@ export class AnalyticsService {
       .find({ userId, _id: { $in: postIds } })
       .toArray();
     const postsById = new Map(posts.map((post) => [String(post._id), post]));
+    const mediaRows = await db
+      .collection('post_media')
+      .find({ userId, postId: { $in: postIds } })
+      .sort({ createdAt: 1 })
+      .toArray();
+    const mediaByPostId = new Map<string, unknown[]>();
+    for (const media of mediaRows) {
+      const key = String(media.postId ?? '');
+      if (!key) continue;
+      const current = mediaByPostId.get(key) ?? [];
+      current.push({
+        mediaType: media.mediaType,
+        mediaUrl: media.mediaUrl,
+        altText: media.altText,
+        ocrText: media.ocrText,
+      });
+      mediaByPostId.set(key, current);
+    }
     const actionQuery: Record<string, unknown> = { userId };
     if (filters.actionType) actionQuery.actionType = filters.actionType;
     const actions = await db
@@ -500,24 +553,61 @@ export class AnalyticsService {
       actionsBySuggestionId.set(key, current);
     }
 
+    const analysisIds = suggestions
+      .map((suggestion) => suggestion.analysisId)
+      .filter((analysisId): analysisId is ObjectId => analysisId instanceof ObjectId);
+    const analyses = analysisIds.length
+      ? await db
+          .collection('post_analysis')
+          .find({ userId, _id: { $in: analysisIds } })
+          .toArray()
+      : [];
+    const analysesById = new Map(
+      analyses.map((analysis) => [String(analysis._id), analysis]),
+    );
+
     return {
       userId,
       items: suggestions
         .map((suggestion) => {
           const post = postsById.get(String(suggestion.postId));
+          const analysis = analysesById.get(String(suggestion.analysisId));
           return {
             suggestionId: String(suggestion._id),
             postId: String(suggestion.postId),
+            analysisId: suggestion.analysisId
+              ? String(suggestion.analysisId)
+              : undefined,
             postType: post?.postType,
             postUrl: post?.postUrl,
+            tweetId: post?.tweetId,
+            postText: post?.text,
+            authorName: post?.authorName,
             username: post?.username,
+            media: mediaByPostId.get(String(suggestion.postId)) ?? [],
             text: suggestion.text,
             language: suggestion.language,
             tone: suggestion.tone,
+            meaningVi: suggestion.meaningVi,
             risk: suggestion.risk,
             optimizationScore: suggestion.optimizationScore,
+            optimizationReason: suggestion.optimizationReason ?? [],
+            avoidReason: suggestion.avoidReason ?? [],
             used: suggestion.used ?? false,
             actions: actionsBySuggestionId.get(String(suggestion._id)) ?? [],
+            analysis: analysis
+              ? {
+                  mode: analysis.mode,
+                  textSummary: analysis.textSummary,
+                  imageSummary: analysis.imageSummary,
+                  combinedContext: analysis.combinedContext,
+                  topic: analysis.topic,
+                  tone: analysis.tone,
+                  intent: analysis.intent,
+                  commentStrategy: analysis.commentStrategy,
+                  warnings: analysis.warnings ?? [],
+                }
+              : undefined,
             createdAt: suggestion.createdAt,
           };
         })
@@ -572,6 +662,13 @@ export class AnalyticsService {
       ])
       .toArray();
     return Object.fromEntries(rows.map((row) => [row._id, row.count]));
+  }
+
+  private requireUserId(userId?: string): string {
+    if (!userId) {
+      throw new BadRequestException('Authenticated userId is required');
+    }
+    return userId;
   }
 
   private async countPostsByType(userId: string) {
@@ -702,28 +799,46 @@ export class AnalyticsService {
           partialFilterExpression: { tweetId: { $type: 'string' } },
         },
       ),
-      db.collection('posts').createIndex(
-        { userId: 1, platform: 1, contentHash: 1 },
-        { unique: true, sparse: true },
-      ),
+      db
+        .collection('posts')
+        .createIndex(
+          { userId: 1, platform: 1, contentHash: 1 },
+          { unique: true, sparse: true },
+        ),
       db.collection('posts').createIndex({ userId: 1, createdAt: -1 }),
-      db.collection('post_media').createIndex(
-        { userId: 1, postId: 1, normalizedMediaUrl: 1 },
-        { unique: true, sparse: true },
-      ),
-      db.collection('post_analysis').createIndex({ userId: 1, postId: 1, createdAt: -1 }),
-      db.collection('post_relations').createIndex(
-        { userId: 1, sourcePostId: 1, targetPostId: 1, relationType: 1 },
-        { unique: true },
-      ),
-      db.collection('post_relations').createIndex({ userId: 1, sourcePostId: 1 }),
-      db.collection('comment_suggestions').createIndex({ userId: 1, postId: 1, createdAt: -1 }),
-      db.collection('comment_actions').createIndex({ userId: 1, postId: 1, actionType: 1, createdAt: -1 }),
-      db.collection('published_comments').createIndex(
-        { userId: 1, commentTweetId: 1 },
-        { unique: true, sparse: true },
-      ),
-      db.collection('published_comments').createIndex({ userId: 1, postId: 1, publishedAt: -1 }),
+      db
+        .collection('post_media')
+        .createIndex(
+          { userId: 1, postId: 1, normalizedMediaUrl: 1 },
+          { unique: true, sparse: true },
+        ),
+      db
+        .collection('post_analysis')
+        .createIndex({ userId: 1, postId: 1, createdAt: -1 }),
+      db
+        .collection('post_relations')
+        .createIndex(
+          { userId: 1, sourcePostId: 1, targetPostId: 1, relationType: 1 },
+          { unique: true },
+        ),
+      db
+        .collection('post_relations')
+        .createIndex({ userId: 1, sourcePostId: 1 }),
+      db
+        .collection('comment_suggestions')
+        .createIndex({ userId: 1, postId: 1, createdAt: -1 }),
+      db
+        .collection('comment_actions')
+        .createIndex({ userId: 1, postId: 1, actionType: 1, createdAt: -1 }),
+      db
+        .collection('published_comments')
+        .createIndex(
+          { userId: 1, commentTweetId: 1 },
+          { unique: true, sparse: true },
+        ),
+      db
+        .collection('published_comments')
+        .createIndex({ userId: 1, postId: 1, publishedAt: -1 }),
     ]);
   }
 
@@ -742,7 +857,9 @@ export class AnalyticsService {
       post: Record<string, unknown>;
     },
   ): Promise<ObjectId> {
-    const postUrl = this.normalizePostUrl(this.toStringValue(input.post.postUrl));
+    const postUrl = this.normalizePostUrl(
+      this.toStringValue(input.post.postUrl),
+    );
     const tweetId = this.toNonEmptyString(input.post.tweetId);
     const text = this.toStringValue(input.post.text);
     const username = this.toStringValue(input.post.username);
@@ -757,13 +874,16 @@ export class AnalyticsService {
       tweetId,
       username,
       text,
-      firstMediaUrl: this.toStringValue(firstMediaRecord?.mediaUrl ?? firstMediaRecord?.url),
+      firstMediaUrl: this.toStringValue(
+        firstMediaRecord?.mediaUrl ?? firstMediaRecord?.url,
+      ),
     });
     const query = tweetId
       ? { userId: input.userId, platform: input.platform, tweetId }
       : { userId: input.userId, platform: input.platform, contentHash };
     const existingPost = await db.collection('posts').findOne(query);
-    const postId = existingPost?._id instanceof ObjectId ? existingPost._id : new ObjectId();
+    const postId =
+      existingPost?._id instanceof ObjectId ? existingPost._id : new ObjectId();
 
     const postSet: Record<string, unknown> = {
       userId: input.userId,
@@ -830,7 +950,12 @@ export class AnalyticsService {
     now: Date,
   ): Promise<void> {
     for (const mediaItem of mediaItems) {
-      if (!mediaItem || typeof mediaItem !== 'object' || Array.isArray(mediaItem)) continue;
+      if (
+        !mediaItem ||
+        typeof mediaItem !== 'object' ||
+        Array.isArray(mediaItem)
+      )
+        continue;
       const media = mediaItem as Record<string, unknown>;
       const mediaUrl = this.toStringValue(media.mediaUrl ?? media.url);
       if (!mediaUrl) continue;
@@ -845,7 +970,10 @@ export class AnalyticsService {
           $set: {
             userId,
             postId,
-            mediaType: this.toStringValue(media.mediaType ?? media.type, 'unknown'),
+            mediaType: this.toStringValue(
+              media.mediaType ?? media.type,
+              'unknown',
+            ),
             mediaUrl,
             normalizedMediaUrl,
             altText: this.toStringValue(media.altText),
@@ -898,5 +1026,96 @@ export class AnalyticsService {
     return createHash('sha256')
       .update(stableParts.filter(Boolean).join('|'))
       .digest('hex');
+  }
+
+  async draftPost(
+    userId: string,
+    topic: string | undefined,
+    language: string,
+    count: number,
+  ): Promise<{ drafts: string[] }> {
+    const db = await this.mongoService.db();
+    const recentAnalyses = await db
+      .collection('post_analysis')
+      .find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    const contextSnippets = recentAnalyses
+      .slice(0, 10)
+      .map((a) => [a.topic, a.intent, a.textSummary].filter(Boolean).join(' — '))
+      .filter(Boolean)
+      .join('\n');
+
+    const systemPrompt = `You are a native ${language} social media content creator for X/Twitter.
+Generate ${count} short, authentic posts (tweets) written by a real ${language} speaker.
+Each post must feel natural, non-promotional, and community-appropriate.
+Return ONLY a JSON array of strings: ["post1", "post2", ...]
+No markdown, no explanation outside the JSON array.`;
+
+    const userPrompt = `${topic ? `Topic: ${topic}\n` : ''}${contextSnippets ? `Context from recent analyzed posts the user engages with:\n${contextSnippets}\n` : ''}Generate ${count} posts in ${language}.`;
+
+    const raw = await this.aiReplyPackService.generateText(systemPrompt, userPrompt);
+    const match = raw.match(/\[[\s\S]*\]/);
+    const drafts: string[] = match ? (JSON.parse(match[0]) as string[]) : [raw.trim()];
+    return { drafts: drafts.slice(0, count) };
+  }
+
+  async getGrowthReport(userId: string, days: number) {
+    const db = await this.mongoService.db();
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const [actionsByDay, analyzeByDay, toneBreakdown, actionTypeBreakdown] = await Promise.all([
+      db.collection('comment_actions').aggregate<{ _id: string; count: number }>([
+        { $match: { userId, createdAt: { $gte: since } } },
+        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]).toArray(),
+
+      db.collection('usage_events').aggregate<{ _id: string; count: number; avgLatencyMs: number }>([
+        { $match: { userId, eventName: 'analyze_succeeded', createdAt: { $gte: since.toISOString() } } },
+        { $group: { _id: { $substr: ['$createdAt', 0, 10] }, count: { $sum: 1 }, avgLatencyMs: { $avg: '$latencyMs' } } },
+        { $sort: { _id: 1 } },
+      ]).toArray(),
+
+      db.collection('used_comment_memories').aggregate<{ _id: string; count: number }>([
+        { $match: { userId, createdAt: { $gte: since } } },
+        { $group: { _id: '$tone', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]).toArray(),
+
+      db.collection('comment_actions').aggregate<{ _id: string; count: number }>([
+        { $match: { userId, createdAt: { $gte: since } } },
+        { $group: { _id: '$actionType', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]).toArray(),
+    ]);
+
+    const dateSet = new Set([...actionsByDay.map(r => r._id), ...analyzeByDay.map(r => r._id)]);
+    const actionsMap = new Map(actionsByDay.map(r => [r._id, r.count]));
+    const analyzeMap = new Map(analyzeByDay.map(r => [r._id, { count: r.count, avgLatencyMs: r.avgLatencyMs }]));
+    const timeline = [...dateSet].sort().map(date => ({
+      date,
+      actions: actionsMap.get(date) ?? 0,
+      analyzed: analyzeMap.get(date)?.count ?? 0,
+      avgLatencyMs: Math.round(analyzeMap.get(date)?.avgLatencyMs ?? 0),
+    }));
+
+    const totalActions = actionsByDay.reduce((sum, r) => sum + r.count, 0);
+    const totalAnalyzed = analyzeByDay.reduce((sum, r) => sum + r.count, 0);
+
+    return {
+      period: days,
+      timeline,
+      totals: {
+        actions: totalActions,
+        analyzed: totalAnalyzed,
+        usageRate: totalAnalyzed > 0 ? Math.round((totalActions / totalAnalyzed) * 100) / 100 : 0,
+      },
+      toneBreakdown: toneBreakdown.map(r => ({ tone: r._id ?? 'unknown', count: r.count })),
+      actionTypeBreakdown: actionTypeBreakdown.map(r => ({ actionType: r._id ?? 'unknown', count: r.count })),
+    };
   }
 }

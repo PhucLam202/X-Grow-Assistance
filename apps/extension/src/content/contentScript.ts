@@ -13,6 +13,13 @@ import type {
 } from '../shared/types';
 import { extractPostContextFromArticle, extractPostFromArticle, findClosestArticle } from './postExtractor';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:3001/api/v1';
+const AUTH_SESSION_STORAGE_KEY = 'x_comment_assistant_auth_session_v1';
+
+type ContentAuthSession = {
+  accessToken: string;
+};
+
 type ChromeRuntime = {
   runtime?: {
     sendMessage(message: SelectedPostMessage | CachePostContextMessage): void;
@@ -26,15 +33,21 @@ type ChromeRuntime = {
       ): void;
     };
   };
+  storage?: {
+    local?: {
+      get(key: string, callback: (items: Record<string, unknown>) => void): void;
+    };
+  };
 };
 
 declare const chrome: ChromeRuntime;
 
 const installState = globalThis as typeof globalThis & {
   __xcaContentScriptInstalled?: boolean;
+  __xcaContentScriptVersion?: string;
 };
-const shouldInstall = !installState.__xcaContentScriptInstalled;
-installState.__xcaContentScriptInstalled = true;
+const CONTENT_SCRIPT_VERSION = '2026-06-14-harness-detector-v2';
+const shouldInstall = installState.__xcaContentScriptVersion !== CONTENT_SCRIPT_VERSION;
 
 let lastSentKey: string | null = null;
 let clickTimer: number | null = null;
@@ -49,15 +62,25 @@ const pendingComments: PendingPublishedComment[] = [];
 const AUTO_SELECT_VISIBLE_RATIO = 0.65;
 const AUTO_SELECT_DELAY_MS = 1000;
 const PENDING_COMMENT_TTL_MS = 2 * 60 * 1000;
-const API_BASE_URL = 'http://127.0.0.1:3001/api/v1';
 
-function createPostKey(message: SelectedPostMessage): string {
-  return [
-    message.post.tweetId,
-    message.post.postUrl,
-    message.post.text,
-    message.post.media.map((item) => item.url).join(','),
-  ].join('|');
+function isContentAuthSession(value: unknown): value is ContentAuthSession {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'accessToken' in value &&
+      typeof (value as ContentAuthSession).accessToken === 'string',
+  );
+}
+
+async function getContentAuthSession(): Promise<ContentAuthSession | null> {
+  if (!chrome.storage?.local) return null;
+
+  return new Promise((resolve) => {
+    chrome.storage?.local?.get(AUTH_SESSION_STORAGE_KEY, (items) => {
+      const value = items[AUTH_SESSION_STORAGE_KEY];
+      resolve(isContentAuthSession(value) ? value : null);
+    });
+  });
 }
 
 function createPostKeyFromPost(post: ExtractedPost): string {
@@ -79,7 +102,7 @@ function sendSelectedPost(article: Element, source: SelectedPostMessage['post'][
     post,
     postContext: postContext ?? undefined,
   };
-  const key = createPostKey(message);
+  const key = createPostKeyFromPost(message.post);
   if (key === lastSentKey) return false;
   lastSentKey = key;
   chrome.runtime?.sendMessage(message);
@@ -332,10 +355,12 @@ async function saveDetectedPublishedComment(request: {
   detectionConfidence?: number;
   rawDetection?: Record<string, unknown>;
 }): Promise<void> {
+  const session = await getContentAuthSession();
   await fetch(`${API_BASE_URL}/analytics/published-comments/detect`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
     },
     body: JSON.stringify(request),
   });
@@ -417,6 +442,11 @@ if (shouldInstall) {
   );
 
   chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+    if (message.type === 'XCA_PING') {
+      sendResponse({ ok: true });
+      return;
+    }
+
     if (message.type === 'XCA_RENDER_POST_OVERLAY') {
       const overlayMessage = message as RenderPostOverlayMessage;
       pendingOverlayScores.set(
@@ -460,8 +490,11 @@ if (shouldInstall) {
       post,
       postContext: postContext ?? undefined,
     });
-    sendResponse({ post, postContext: postContext ?? undefined });
+      sendResponse({ post, postContext: postContext ?? undefined });
   });
+
+  installState.__xcaContentScriptInstalled = true;
+  installState.__xcaContentScriptVersion = CONTENT_SCRIPT_VERSION;
 
   window.setTimeout(detectDetailPagePost, 800);
   window.addEventListener('popstate', () => window.setTimeout(detectDetailPagePost, 800));

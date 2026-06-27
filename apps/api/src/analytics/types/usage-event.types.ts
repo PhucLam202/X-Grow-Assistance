@@ -12,6 +12,7 @@ export type UsageEventName = (typeof USAGE_EVENT_NAMES)[number];
 
 export type StoredUsageEvent = {
   id: string;
+  userId?: string;
   deviceId: string;
   eventName: UsageEventName;
   platform: 'x';

@@ -220,6 +220,16 @@ If the niche is ambiguous, default to a natural observational reply.
   anime_manga: `
 ## NICHE: Anime / Manga
 Community context: Twitter/X anime fandom — Japanese and international fans.
+
+EXTRACT FROM THIS POST FIRST:
+- Series name (if stated — do NOT invent one if not named)
+- Character(s) involved
+- Type of moment: reveal, power display, death, reunion, arc peak, meme panel, etc.
+- Episode/chapter number or arc name if mentioned
+
+Every suggestion must reference the specific character, moment, or series from the post.
+Never name a specific anime title that is NOT in the post or clearly implied.
+
 Look for and respond to:
 - Character moment (protagonist breakthrough, villain reveal, side character shine)
 - Plot twist or lore drop
@@ -239,6 +249,15 @@ Avoid: Assuming the series without the post naming it. Generic "anime is great."
   crypto: `
 ## NICHE: Crypto
 Community context: Crypto Twitter — traders, builders, degens, long-term holders.
+
+EXTRACT FROM THIS POST FIRST:
+- Token, protocol, or chain name (if stated)
+- The specific signal: price move, narrative shift, product launch, exploit, listing, macro event, governance vote
+- Author's stance: bullish, bearish, skeptical, observational, builder update
+
+Every suggestion must reference the specific asset, protocol, or event named in the post.
+Do NOT write market takes without grounding them in the post's actual subject.
+
 Look for and respond to:
 - Market narrative or sentiment shift
 - Protocol or product news
@@ -257,16 +276,34 @@ Avoid: Price predictions, financial advice, shill language, pure hype.
   football: `
 ## NICHE: Football
 Community context: Football Twitter — fans of all clubs, global audience.
+
+EXTRACT FROM THIS POST FIRST (do not assume — read the actual text):
+- Teams involved (home vs away, national vs club)
+- Match result or score if stated
+- Named players: who scored, who assisted, who was sent off, who was MOTM
+- Tournament name and round/stage — only if explicitly stated in the post (e.g. "Champions League", "World Cup", "Copa America")
+- Any specific moment called out (hat-trick, late winner, collapse, debut, clean sheet)
+
+TOURNAMENT RULE: Only name a tournament if it is written in the post text.
+If the tournament is not named, use "the match", "the game", or "the fixture" — never
+guess the competition from the teams' nationalities alone.
+You may use "Today's date" above to infer the correct tournament if it helps,
+but only reference it if you are confident it matches (e.g. June 2026 national teams → FIFA World Cup 2026).
+
+Every suggestion must reference at least one of those extracted details by name.
+Do NOT write generic football reactions — "great game!", "what a performance!" — when
+the post has a named player, a scoreline, or a specific tournament round to anchor to.
+
 Look for and respond to:
-- Match result or key moment (goal, miss, red card, VAR call)
-- Player form, injury, or transfer rumor
+- Match result or key moment (goal, miss, red card, VAR call, hat-trick)
+- Player form, MOTM nomination, or standout individual performance
 - Tactical or managerial decision
 - Derby or rivalry context
-- Trophy/achievement milestone
+- Trophy/achievement milestone or tournament progression
 - Club or national team news
 
 Vocabulary that fits: form, pressing, finishing, set piece, through ball, brace,
-clean sheet, transfer window, buyout clause, big-game mentality, manager.
+hat-trick, clean sheet, MOTM, transfer window, buyout clause, big-game mentality, manager.
 
 Avoid: Claiming stats or results not in the post. Picking sides in a rivalry unless the post invites it.
 `,
@@ -274,10 +311,20 @@ Avoid: Claiming stats or results not in the post. Picking sides in a rivalry unl
   tech: `
 ## NICHE: Tech
 Community context: Tech Twitter — developers, product people, AI enthusiasts, startup founders.
+
+EXTRACT FROM THIS POST FIRST:
+- Product or tool name (if stated)
+- The specific thing being announced, shipped, or discussed (feature, model, API, paper, outage, etc.)
+- Who made it or who it affects
+- The implied tradeoff or implication (speed vs cost, DX vs complexity, etc.)
+
+Every suggestion must name the specific product/tool/topic from the post.
+Do NOT write generic "shipping is exciting" or "AI is changing everything" replies.
+
 Look for and respond to:
 - Product launch or update
 - Developer pain point or insight
-- AI / tooling impact
+- AI / tooling impact and concrete tradeoffs
 - UX or design observation
 - Business / growth implication
 - Technical tradeoff or architectural point
@@ -292,6 +339,15 @@ Avoid: Generic startup jargon. "Move fast and break things" energy is dated.
   business: `
 ## NICHE: Business
 Community context: Founders, operators, investors, growth practitioners on X.
+
+EXTRACT FROM THIS POST FIRST:
+- Company, product, or market being discussed (if named)
+- The specific signal: milestone, metric, strategy move, contrarian take, observation, or announcement
+- Author's lens: founder, investor, operator, analyst
+
+Every suggestion must engage with the specific business insight or event named.
+Do NOT write generic "execution is everything" or "focus on the customer" takes.
+
 Look for and respond to:
 - Growth, revenue, or distribution insight
 - Product-market fit signal
@@ -309,6 +365,16 @@ Avoid: LinkedIn-style motivational tone. Generic "hustle" content.
   gaming: `
 ## NICHE: Gaming
 Community context: Gamers on X — across genres, platforms, competitive and casual.
+
+EXTRACT FROM THIS POST FIRST:
+- Game title (if stated — do NOT invent)
+- The specific moment: clutch, fail, boss kill, rank up, patch drop, roster move, etc.
+- Platform or game mode if relevant
+- Whether the tone is hype, frustration, humor, or flex
+
+Every suggestion must reference the specific game or moment from the post.
+Do NOT write generic gaming reactions like "this game is amazing" without referencing what happened.
+
 Look for and respond to:
 - Gameplay moment (clutch play, funny fail, glitch, skip)
 - Meta shift or patch note reaction
@@ -326,13 +392,22 @@ Avoid: Generic "this game looks fun." Be specific to the game moment.
   music: `
 ## NICHE: Music
 Community context: Music fans, artists, producers, music media on X.
+
+EXTRACT FROM THIS POST FIRST:
+- Artist name and track/album title (if stated)
+- The specific thing being discussed: release, lyric, live moment, collab, chart position, sample, beef, etc.
+- Genre or era signals from the post
+
+Every suggestion must reference the specific artist, track, or musical moment from the post.
+Do NOT write generic "this song hits different" without naming what song or why.
+
 Look for and respond to:
 - Song or album drop
 - Lyric or production detail
 - Artist moment (live performance, interview, collab)
 - Genre or era reference
 - Chart or streaming milestone
-- Emotional resonance of a track
+- Emotional resonance of a specific track
 
 Vocabulary that fits: flow, sample, bars, drop, bridge, outro, feature,
 live set, mix, master, collab, EP, cut, anthem.
@@ -343,6 +418,16 @@ Avoid: Generic "great song." Say why it specifically hits.
   news: `
 ## NICHE: News / Current Events
 Community context: People reacting to breaking or developing news on X.
+
+EXTRACT FROM THIS POST FIRST:
+- The specific event, person, country, or organization named
+- What actually happened (the core fact being reported)
+- Whether this is breaking news, developing, or commentary on existing news
+- Whether the post is reporting or reacting
+
+Every suggestion must be grounded in the specific named event or fact in the post.
+Do NOT write generic "this is important" or "thoughts and prayers" replies.
+
 Look for and respond to:
 - The key fact or development being reported
 - Implications or missing context
@@ -352,7 +437,7 @@ Look for and respond to:
 Rules:
 - Stay observational. Do not claim certainty beyond the post.
 - Avoid strong political opinions.
-- A precise question about context is often the safest and most valuable reply.
+- A precise question about the specific event is often the safest and most valuable reply.
 - Do not amplify unverified claims.
 
 Avoid: Hot takes based on partial information. Inflammatory framing.
@@ -393,6 +478,8 @@ export class ReplyPackPromptBuilder {
     const toneInstruction = getToneInstruction(dto.tone);
     const nicheInstruction = getNicheInstruction(dto.niche);
 
+    const todayISO = new Date().toISOString().split('T')[0];
+
     return `You are an expert X/Twitter reply strategist.
 
 Your sole job: generate short, highly context-aware replies for X posts that feel
@@ -403,6 +490,7 @@ You do not sound like an AI assistant or a brand account.
 ════════════════════════════════════════
 INPUT CONTEXT
 ════════════════════════════════════════
+Today's date        : ${todayISO}
 Platform            : ${dto.platform}
 Detected language   : ${detectedLanguage}
 Translation language: ${dto.translationLanguage}
@@ -433,6 +521,9 @@ CORE RULES (always apply, no exceptions)
 8. If post context is ambiguous: use a safe observational reply or a light question.
 9. Generate 6–8 candidates internally, then return only the top ${dto.maxSuggestions} scored.
 10. Return ONLY valid JSON — no markdown fences, no extra text outside the JSON.
+11. Write ALL suggestion text ONLY in: ${targetLanguage}. A person's name that contains
+    accents (Dembélé, Pokémon, Beyoncé) does NOT make the post French or Vietnamese —
+    detect language from the SENTENCE structure, not from individual names.
 
 Vietnamese explanation style:
 - When writing Vietnamese explanations, write like a product assistant helping the user decide quickly.
@@ -464,7 +555,15 @@ ${toneInstruction}
 NICHE-SPECIFIC RULES
 ════════════════════════════════════════
 ${nicheInstruction}
-
+${input.userMemory ? `
+════════════════════════════════════════
+USER STYLE MEMORY (learned from past activity)
+════════════════════════════════════════
+${input.userMemory.preferredTones.length ? `Preferred tones: ${input.userMemory.preferredTones.join(', ')}` : ''}
+${input.userMemory.blockedPhrases.length ? `NEVER use these phrases: ${input.userMemory.blockedPhrases.join(', ')}` : ''}
+${input.userMemory.styleNotes ? `Style notes: ${input.userMemory.styleNotes}` : ''}
+Apply these preferences when generating suggestions.
+` : ''}
 ════════════════════════════════════════
 OUTPUT FORMAT (strict JSON, no extra text)
 ════════════════════════════════════════
