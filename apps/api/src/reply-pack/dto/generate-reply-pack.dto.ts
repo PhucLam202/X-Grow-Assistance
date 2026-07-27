@@ -45,17 +45,17 @@ export class GenerateReplyPackDto {
   postUrl?: string;
 
   @IsIn(TARGET_COMMENT_LANGUAGES)
-  targetCommentLanguage: TargetCommentLanguage;
+  targetCommentLanguage: string;
 
   @IsOptional()
   @IsIn(['vi', 'en'])
   explanationLanguage?: 'vi' | 'en';
 
   @IsIn(COMMENT_TONES)
-  tone: CommentTone;
+  tone: string;
 
   @IsIn(COMMENT_NICHES)
-  niche: CommentNiche;
+  niche: string;
 
   @IsInt()
   @Min(1)

@@ -31,6 +31,68 @@ export class AiConfigService {
     return provider;
   }
 
+  getTextFallbackConfig():
+    | (ProviderConfig & { provider: AiProviderName })
+    | null {
+    const rawProvider = this.configService.get<string>(
+      'TEXT_FALLBACK_AI_PROVIDER',
+    );
+    if (!rawProvider || !rawProvider.trim()) {
+      return null;
+    }
+
+    const provider = this.normalizeProviderName(
+      rawProvider.trim(),
+    ) as AiProviderName;
+    if (!this.isValidProviderName(provider)) {
+      throw new Error(`Unsupported TEXT_FALLBACK_AI_PROVIDER: ${rawProvider}`);
+    }
+
+    const configuredModel = this.configService.get<string>(
+      'TEXT_FALLBACK_AI_MODEL',
+    );
+    const model =
+      configuredModel && configuredModel.trim()
+        ? configuredModel.trim()
+        : this.getProviderDefaultModel(provider);
+
+    const apiKey = this.getApiKeyForProvider(provider);
+
+    return { provider, apiKey, model };
+  }
+
+  getVisionFallbackConfig():
+    | (ProviderConfig & { provider: AiProviderName })
+    | null {
+    const rawProvider = this.configService.get<string>(
+      'VISION_FALLBACK_AI_PROVIDER',
+    );
+    if (!rawProvider || !rawProvider.trim()) {
+      return null;
+    }
+
+    const provider = this.normalizeProviderName(
+      rawProvider.trim(),
+    ) as AiProviderName;
+    if (!this.isValidProviderName(provider)) {
+      throw new Error(
+        `Unsupported VISION_FALLBACK_AI_PROVIDER: ${rawProvider}`,
+      );
+    }
+
+    const configuredModel = this.configService.get<string>(
+      'VISION_FALLBACK_AI_MODEL',
+    );
+    const model =
+      configuredModel && configuredModel.trim()
+        ? configuredModel.trim()
+        : this.getProviderDefaultVisionModel(provider);
+
+    const apiKey = this.getApiKeyForProvider(provider);
+
+    return { provider, apiKey, model };
+  }
+
   private getProviderNameFromEnv(
     primaryEnvName: string,
     legacyEnvName: string,
@@ -43,20 +105,23 @@ export class AiConfigService {
 
     const provider = this.normalizeProviderName(providerValue);
 
-    if (
-      provider === 'openai' ||
-      provider === 'deepseek' ||
-      provider === 'gemini' ||
-      provider === 'claude' ||
-      provider === 'openrouter'
-    ) {
-      return provider;
+    if (this.isValidProviderName(provider)) {
+      return provider as AiProviderName;
     }
 
     throw new Error(`Unsupported ${primaryEnvName}: ${provider}`);
   }
 
-  // ponytail: prefix beats per-model cases; add a case only when prefix breaks
+  private isValidProviderName(provider: string): boolean {
+    return (
+      provider === 'openai' ||
+      provider === 'deepseek' ||
+      provider === 'gemini' ||
+      provider === 'claude' ||
+      provider === 'openrouter'
+    );
+  }
+
   private normalizeProviderName(value: string): string {
     const v = value.trim().toLowerCase();
     if (v.startsWith('gpt')) return 'openai';
@@ -74,10 +139,18 @@ export class AiConfigService {
     }
     if (name === 'deepseek') {
       const { apiKey, model } = this.getDeepSeekConfig();
-      return { apiUrl: 'https://api.deepseek.com/v1/chat/completions', apiKey, model };
+      return {
+        apiUrl: 'https://api.deepseek.com/v1/chat/completions',
+        apiKey,
+        model,
+      };
     }
     const { apiKey, model } = this.getOpenAiConfig();
-    return { apiUrl: 'https://api.openai.com/v1/chat/completions', apiKey, model };
+    return {
+      apiUrl: 'https://api.openai.com/v1/chat/completions',
+      apiKey,
+      model,
+    };
   }
 
   getOpenAiConfig(): ProviderConfig {
@@ -100,7 +173,7 @@ export class AiConfigService {
     return this.getProviderConfig(
       'DEEPSEEK_API_KEY',
       'DEEPSEEK_MODEL',
-      'deepseek-chat',
+      'deepseek-v4-flash',
     );
   }
 
@@ -133,6 +206,47 @@ export class AiConfigService {
         'https://openrouter.ai/api/v1',
       ),
     };
+  }
+
+  getProviderDefaultModel(provider: AiProviderName): string {
+    switch (provider) {
+      case 'openai':
+        return this.getOpenAiConfig().model;
+      case 'deepseek':
+        return this.getDeepSeekConfig().model;
+      case 'gemini':
+        return this.getGeminiConfig().model;
+      case 'claude':
+        return this.getClaudeConfig().model;
+      case 'openrouter':
+        return this.getOpenRouterConfig().model;
+    }
+  }
+
+  getProviderDefaultVisionModel(provider: AiProviderName): string {
+    switch (provider) {
+      case 'openai':
+        return this.getOpenAiVisionConfig().model;
+      case 'openrouter':
+        return this.getOpenRouterConfig().model;
+      default:
+        return this.getProviderDefaultModel(provider);
+    }
+  }
+
+  getApiKeyForProvider(provider: AiProviderName): string {
+    switch (provider) {
+      case 'openai':
+        return this.getOpenAiConfig().apiKey;
+      case 'deepseek':
+        return this.getDeepSeekConfig().apiKey;
+      case 'gemini':
+        return this.getGeminiConfig().apiKey;
+      case 'claude':
+        return this.getClaudeConfig().apiKey;
+      case 'openrouter':
+        return this.getOpenRouterConfig().apiKey;
+    }
   }
 
   private getProviderConfig(

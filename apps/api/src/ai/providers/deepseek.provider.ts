@@ -1,8 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { AiConfigService } from '../ai.config';
-import { AiReplyPackInput, OpenAiCompatibleResponse } from '../ai.types';
+import { AiProviderResult, AiReplyPackInput } from '../ai.types';
 import { ReplyPackPromptBuilder } from '../prompt/reply-pack.prompt';
-import { AiProvider } from './ai-provider.interface';
+import { AiProvider, AiStructuredCallOptions } from './ai-provider.interface';
+import { postOpenAiCompat } from './http.util';
+import { STRUCTURED_SYSTEM_PROMPT } from './openai.provider';
+
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
 @Injectable()
 export class DeepSeekProvider implements AiProvider {
@@ -13,48 +17,31 @@ export class DeepSeekProvider implements AiProvider {
     private readonly promptBuilder: ReplyPackPromptBuilder,
   ) {}
 
-  async generateReplyPack(input: AiReplyPackInput): Promise<string> {
+  generateReplyPack(input: AiReplyPackInput): Promise<AiProviderResult> {
     const { apiKey, model } = this.aiConfig.getDeepSeekConfig();
-    const prompt = this.promptBuilder.build(input);
+    return postOpenAiCompat(
+      DEEPSEEK_URL,
+      apiKey,
+      model,
+      this.promptBuilder.build(input),
+      // ponytail: 1500 truncated CJK reply packs mid-JSON; raise if 4 suggestions still get cut
+      { temperature: 0.7, maxTokens: 3000, providerName: 'deepseek' },
+    );
+  }
 
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        temperature: 0.7,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are an assistant that returns only valid JSON for X comment reply packs. Do not add markdown or extra text.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
+  generateStructured(
+    prompt: string,
+    options?: AiStructuredCallOptions,
+  ): Promise<AiProviderResult> {
+    const { apiKey, model } = this.aiConfig.getDeepSeekConfig();
+    return postOpenAiCompat(DEEPSEEK_URL, apiKey, model, prompt, {
+      temperature: 0.7,
+      // ponytail: analysis.translation của post CJK dài + 4 candidate vượt 1500
+      // → JSON đứt trước mảng candidates → AI_INVALID_OUTPUT.
+      maxTokens: 4000,
+      ...options,
+      providerName: 'deepseek',
+      systemPrompt: STRUCTURED_SYSTEM_PROMPT,
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `DeepSeek request failed: ${response.status} ${errorText}`,
-      );
-    }
-
-    const payload = (await response.json()) as OpenAiCompatibleResponse;
-    const content = payload.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('DeepSeek returned an empty response');
-    }
-
-    return content;
   }
 }

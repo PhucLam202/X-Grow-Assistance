@@ -1,8 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import type { AuthUser } from './types/auth-user.type';
@@ -17,7 +13,9 @@ export class AuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.user = await this.authService.verifyBearerToken(request.headers.authorization);
+    request.user = await this.authService.verifyBearerToken(
+      request.headers.authorization,
+    );
     return true;
   }
 }

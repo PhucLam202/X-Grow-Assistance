@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { AiReplyPackInput } from '../ai.types';
 
+export const GENERATION_PROMPT_VERSION = 'generation:v1';
+
 // ─── Tone-specific instruction blocks ─────────────────────────────────────────
 // Each block defines the exact voice, constraints, and expected output feel for
 // that tone. The model must NOT blend these or fall back to a generic style.
@@ -9,23 +11,22 @@ const TONE_INSTRUCTIONS: Record<string, string> = {
   short_native: `
 ## TONE: Short Native Reply
 Identity: A real user casually tapping out a reply on their phone.
-Voice: Minimal, unpolished, direct — exactly how a native speaker would comment
-in 2–12 words without thinking too hard.
+Voice: Natural, unpolished, direct — exactly how a native speaker would comment
+in 6–18 words with genuine personality.
 
 Rules:
-- Maximum ~12 words per suggestion. Shorter is almost always better.
-- Zero formal structure. No full sentences required.
+- Write complete, natural thoughts — typically 6 to 18 words (1 concise sentence or punchy phrase).
+- Avoid artificially truncated 2–3 word stubs that feel incomplete or robotic.
 - Light slang or colloquial phrasing is encouraged if the target language supports it.
-- Sound lazy in a cool way — not trying too hard.
-- One authentic reaction per comment.
+- Sound relaxed, authentic, and engaged.
+- One authentic reaction or observation per comment.
 
 Never write:
-- "Great post!", "Thanks for sharing!", or any opener phrase.
-- Multiple clauses joined by "and" or "but".
-- Motivational or supportive statements.
+- "Great post!", "Thanks for sharing!", or any corporate opener phrase.
+- Motivational or generic filler statements.
 
-Output feel examples (EN): "too real", "this is the way", "called it"
-Output feel examples (VI): "đúng vibe", "chuẩn không cần chỉnh", "y chang tui"
+Output feel examples (EN): "this hit way too close to home honestly", "yeah no chance i would have solved that either"
+Output feel examples (VI): "nhìn cái này xong tự nhiên thấy đồng cảm ghê", "đúng kiểu chữ xấu là bó tay thật luôn"
 `,
 
   casual_supportive: `
@@ -208,6 +209,16 @@ Output feel: A real person who actually knows what they're congratulating.
 // These focus the model on what to look for inside the post and what vocabulary
 // is authentic for that community. They work in tandem with tone instructions.
 
+/**
+ * @deprecated Chỉ phủ 9/20 niche trong `types/niche.types.ts`, và được tra theo
+ * lựa chọn thô của user (kể cả `'auto'`) chứ không theo niche mà cascade phát
+ * hiện. Nguồn thay thế là niche policy registry (Phase 3) —
+ * `niche/niche-policy.prompt-adapter.ts` → `buildNichePolicyPrompt()`, đã phủ
+ * đủ 20 niche và có safety rules riêng từng niche.
+ *
+ * Giữ lại vì đây vẫn là path generation đang chạy production. Việc xoá nó gắn
+ * liền với lúc orchestrator chuyển sang `candidates/` (Phase 5/6).
+ */
 const NICHE_INSTRUCTIONS: Record<string, string> = {
   auto: `
 ## NICHE: Auto-detect
@@ -505,21 +516,23 @@ Post URL            : ${dto.postUrl ?? ''}
 ════════════════════════════════════════
 POST
 ════════════════════════════════════════
-${dto.postText}
+<post_content>
+${dto.postText.slice(0, 3000)}
+</post_content>
 
 ════════════════════════════════════════
 CORE RULES (always apply, no exceptions)
 ════════════════════════════════════════
 1. Read and understand the exact post before writing anything.
-2. Every suggestion must be specific to THIS post — not reusable on other posts.
+2. STRICT RELEVANCE: Every single suggestion MUST be deeply relevant and anchored to the specific facts, topic, or subtext of THIS post. Never output generic filler comments that could fit any post.
 3. Sound like a real person from the selected community, not an AI assistant.
-4. Keep replies short unless the tone explicitly allows more depth.
+4. Write natural, expressive, and complete replies (typically 8–25 words for standard comments, 6–18 words for short native replies). Avoid artificially truncated 2–3 word stubs unless the post itself is a 1-word meme.
 5. Forbidden phrases: "Great post", "Nice", "Thanks for sharing", "This is amazing",
    "So inspiring", "Keep it up", "Love this", unless there is a concrete, specific twist.
 6. No corporate tone. No explaining the joke. No forced hashtags.
 7. Do not claim facts, stats, or context not present in the post.
 8. If post context is ambiguous: use a safe observational reply or a light question.
-9. Generate 6–8 candidates internally, then return only the top ${dto.maxSuggestions} scored.
+9. MANDATORY QUANTITY & RELEVANCE: You MUST return EXACTLY ${dto.maxSuggestions} suggestions in the "suggestions" array. All ${dto.maxSuggestions} suggestions MUST be 100% relevant to this exact post, offering 3 distinct, high-quality angles (e.g. Angle 1: Direct reaction/agreement, Angle 2: Insightful observation/question, Angle 3: Natural witty/relatable reframe). Returning generic or irrelevant filler is strictly forbidden.
 10. Return ONLY valid JSON — no markdown fences, no extra text outside the JSON.
 11. Write ALL suggestion text ONLY in: ${targetLanguage}. A person's name that contains
     accents (Dembélé, Pokémon, Beyoncé) does NOT make the post French or Vietnamese —
@@ -555,7 +568,9 @@ ${toneInstruction}
 NICHE-SPECIFIC RULES
 ════════════════════════════════════════
 ${nicheInstruction}
-${input.userMemory ? `
+${
+  input.userMemory
+    ? `
 ════════════════════════════════════════
 USER STYLE MEMORY (learned from past activity)
 ════════════════════════════════════════
@@ -563,7 +578,9 @@ ${input.userMemory.preferredTones.length ? `Preferred tones: ${input.userMemory.
 ${input.userMemory.blockedPhrases.length ? `NEVER use these phrases: ${input.userMemory.blockedPhrases.join(', ')}` : ''}
 ${input.userMemory.styleNotes ? `Style notes: ${input.userMemory.styleNotes}` : ''}
 Apply these preferences when generating suggestions.
-` : ''}
+`
+    : ''
+}
 ════════════════════════════════════════
 OUTPUT FORMAT (strict JSON, no extra text)
 ════════════════════════════════════════
@@ -611,7 +628,7 @@ IMPORTANT FINAL CHECKS:
 - translation, summary, context, commentStrategy must be in: ${dto.translationLanguage}.
 - meaningVi and whyVisible must always be in natural Vietnamese, not literal translationese.
 - whyItWorks must be specific to the post and avoid generic advice.
-- Return exactly ${dto.maxSuggestions} suggestions (or fewer only if the post has insufficient context).
+- MANDATORY: Return EXACTLY ${dto.maxSuggestions} suggestions in the "suggestions" array. Never return fewer than ${dto.maxSuggestions} items.
 - No markdown. Return raw JSON only.
 `;
   }

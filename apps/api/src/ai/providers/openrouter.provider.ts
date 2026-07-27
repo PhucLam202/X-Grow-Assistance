@@ -1,8 +1,20 @@
 import { Injectable } from '@nestjs/common';
+import { ErrorCodes } from '../../common/errors/error-codes';
 import { AiConfigService } from '../ai.config';
-import { AiReplyPackInput, AiVisionInput, OpenAiCompatibleResponse } from '../ai.types';
+import {
+  AiProviderError,
+  AiProviderResult,
+  AiReplyPackInput,
+  AiVisionInput,
+} from '../ai.types';
 import { VisionAnalysisPromptBuilder } from '../prompt/vision-analysis.prompt';
 import { AiProvider } from './ai-provider.interface';
+import { postOpenAiVision } from './http.util';
+
+const OPENROUTER_HEADERS = {
+  'HTTP-Referer': 'https://github.com/x-comment-assistant',
+  'X-Title': 'X Comment Assistant',
+};
 
 @Injectable()
 export class OpenRouterProvider implements AiProvider {
@@ -13,80 +25,51 @@ export class OpenRouterProvider implements AiProvider {
     private readonly visionPromptBuilder: VisionAnalysisPromptBuilder,
   ) {}
 
-  // OpenRouter is vision-only in this setup; text requests fall back to text provider
-  async generateReplyPack(_input: AiReplyPackInput): Promise<string> {
-    throw new Error('OpenRouter provider is configured for vision only. Set TEXT_AI_PROVIDER to a text provider.');
-  }
-
-  async analyzeVision(input: AiVisionInput): Promise<string> {
-    return this.sendVisionRequest(
-      this.visionPromptBuilder.build(input),
-      input,
-      'OpenRouter vision request failed',
-    );
-  }
-
-  async analyzeVisionContext(input: AiVisionInput): Promise<string> {
-    return this.sendVisionRequest(
-      this.visionPromptBuilder.buildContext(input),
-      input,
-      'OpenRouter vision context request failed',
-    );
-  }
-
-  private async sendVisionRequest(
-    prompt: string,
-    input: AiVisionInput,
-    errorPrefix: string,
-  ): Promise<string> {
-    const { apiKey, model, baseUrl } = this.aiConfig.getOpenRouterConfig();
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/x-comment-assistant',
-        'X-Title': 'X Comment Assistant',
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  generateReplyPack(_input: AiReplyPackInput): Promise<AiProviderResult> {
+    throw new AiProviderError(
+      'OpenRouter provider is configured for vision only. Set TEXT_AI_PROVIDER to a text provider.',
+      {
+        providerName: 'openrouter',
+        code: ErrorCodes.AI_UNSUPPORTED_CAPABILITY,
+        isRetryable: false,
       },
-      body: JSON.stringify({
-        model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a vision-capable assistant that returns only valid JSON for X post image analysis. Do not add markdown or extra text.',
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              ...input.images.map((image) => ({
-                type: 'image_url',
-                image_url: {
-                  url: `data:${image.contentType};base64,${image.base64}`,
-                  detail: 'auto',
-                },
-              })),
-            ],
-          },
-        ],
-      }),
-    });
+    );
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`${errorPrefix}: ${response.status} ${errorText}`);
-    }
+  analyzeVision(input: AiVisionInput): Promise<AiProviderResult> {
+    const { apiKey, model, baseUrl } = this.aiConfig.getOpenRouterConfig();
+    return postOpenAiVision(
+      `${baseUrl}/chat/completions`,
+      apiKey,
+      model,
+      this.promptBuilderBuild(input),
+      input.images,
+      {
+        maxTokens: 4096,
+        extraHeaders: OPENROUTER_HEADERS,
+        providerName: 'openrouter',
+      },
+    );
+  }
 
-    const payload = (await response.json()) as OpenAiCompatibleResponse;
-    const content = payload.choices?.[0]?.message?.content;
+  analyzeVisionContext(input: AiVisionInput): Promise<AiProviderResult> {
+    const { apiKey, model, baseUrl } = this.aiConfig.getOpenRouterConfig();
+    return postOpenAiVision(
+      `${baseUrl}/chat/completions`,
+      apiKey,
+      model,
+      this.visionPromptBuilder.buildContext(input),
+      input.images,
+      {
+        maxTokens: 600,
+        extraHeaders: OPENROUTER_HEADERS,
+        providerName: 'openrouter',
+      },
+    );
+  }
 
-    if (!content) {
-      throw new Error('OpenRouter returned an empty response');
-    }
-
-    return content;
+  private promptBuilderBuild(input: AiVisionInput): string {
+    return this.visionPromptBuilder.build(input);
   }
 }

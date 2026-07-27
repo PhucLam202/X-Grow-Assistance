@@ -7,7 +7,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  pbkdf2Sync,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from 'node:crypto';
 import type { Collection } from 'mongodb';
 import { MongoService } from '../mongo/mongo.service';
 import type { LoginDto } from './dto/login.dto';
@@ -147,14 +153,21 @@ export class AuthService {
     const users = db.collection<UserDocument>('users');
     const existingUser = await this.findUserByIdentity(users, email, phone);
     if (!existingUser) {
-      throw new UnauthorizedException('Account does not exist. Create account first.');
+      throw new UnauthorizedException(
+        'Account does not exist. Create account first.',
+      );
     }
 
     if (!existingUser.passwordHash || !existingUser.passwordSalt) {
-      throw new UnauthorizedException('Create a password for this account first');
+      throw new UnauthorizedException(
+        'Create a password for this account first',
+      );
     }
 
-    const passwordHash = this.hashPassword(dto.password, existingUser.passwordSalt);
+    const passwordHash = this.hashPassword(
+      dto.password,
+      existingUser.passwordSalt,
+    );
     if (!this.safeEqual(passwordHash, existingUser.passwordHash)) {
       throw new UnauthorizedException('Incorrect password');
     }
@@ -211,7 +224,7 @@ export class AuthService {
   private signUser(user: AuthUser, tokenVersion: number): string {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const ttlSeconds = Number(
-      this.configService.get<string>('JWT_TTL_SECONDS', `${60 * 60 * 24 * 30}`),
+      this.configService.get<string>('JWT_TTL_SECONDS', `${60 * 60 * 24 * 7}`),
     );
     const payload: JwtPayload = {
       ...user,
@@ -302,7 +315,9 @@ export class AuthService {
   }
 
   private hashPassword(password: string, salt: string): string {
-    return pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('base64url');
+    return pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString(
+      'base64url',
+    );
   }
 
   private enforceRateLimit(key: string): void {
@@ -317,7 +332,10 @@ export class AuthService {
     }
 
     if (bucket.count >= AUTH_RATE_LIMIT_MAX_ATTEMPTS) {
-      throw new HttpException('Too many auth attempts', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        'Too many auth attempts',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     bucket.count += 1;

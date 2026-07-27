@@ -1,13 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { AiConfigService } from '../ai.config';
-import {
-  AiReplyPackInput,
-  AiVisionInput,
-  OpenAiCompatibleResponse,
-} from '../ai.types';
+import { AiProviderResult, AiReplyPackInput, AiVisionInput } from '../ai.types';
 import { ReplyPackPromptBuilder } from '../prompt/reply-pack.prompt';
 import { VisionAnalysisPromptBuilder } from '../prompt/vision-analysis.prompt';
-import { AiProvider } from './ai-provider.interface';
+import { AiProvider, AiStructuredCallOptions } from './ai-provider.interface';
+import { postOpenAiCompat, postOpenAiVision } from './http.util';
+
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+
+export const STRUCTURED_SYSTEM_PROMPT =
+  'You return only valid JSON matching the schema in the user message. ' +
+  'No markdown, no commentary, no code fences.';
 
 @Injectable()
 export class OpenAiProvider implements AiProvider {
@@ -19,115 +22,50 @@ export class OpenAiProvider implements AiProvider {
     private readonly visionPromptBuilder: VisionAnalysisPromptBuilder,
   ) {}
 
-  async generateReplyPack(input: AiReplyPackInput): Promise<string> {
+  generateReplyPack(input: AiReplyPackInput): Promise<AiProviderResult> {
     const { apiKey, model } = this.aiConfig.getOpenAiConfig();
-    const prompt = this.promptBuilder.build(input);
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are an assistant that returns only valid JSON for X comment reply packs. Do not add markdown or extra text.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`OpenAI request failed: ${response.status} ${errorText}`);
-    }
-
-    const payload = (await response.json()) as OpenAiCompatibleResponse;
-    const content = payload.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('OpenAI returned an empty response');
-    }
-
-    return content;
-  }
-
-  async analyzeVision(input: AiVisionInput): Promise<string> {
-    return this.sendVisionRequest(
-      this.visionPromptBuilder.build(input),
-      input,
-      'OpenAI vision request failed',
+    return postOpenAiCompat(
+      OPENAI_URL,
+      apiKey,
+      model,
+      this.promptBuilder.build(input),
+      { providerName: 'openai' },
     );
   }
 
-  async analyzeVisionContext(input: AiVisionInput): Promise<string> {
-    return this.sendVisionRequest(
-      this.visionPromptBuilder.buildContext(input),
-      input,
-      'OpenAI vision context request failed',
-    );
-  }
-
-  private async sendVisionRequest(
+  generateStructured(
     prompt: string,
-    input: AiVisionInput,
-    errorPrefix: string,
-  ): Promise<string> {
-    const { apiKey, model } = this.aiConfig.getOpenAiVisionConfig();
-
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a vision-capable assistant that returns only valid JSON for X post image analysis. Do not add markdown or extra text.',
-          },
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              ...input.images.map((image) => ({
-                type: 'image_url',
-                image_url: {
-                  url: `data:${image.contentType};base64,${image.base64}`,
-                  detail: 'auto',
-                },
-              })),
-            ],
-          },
-        ],
-      }),
+    options?: AiStructuredCallOptions,
+  ): Promise<AiProviderResult> {
+    const { apiKey, model } = this.aiConfig.getOpenAiConfig();
+    return postOpenAiCompat(OPENAI_URL, apiKey, model, prompt, {
+      ...options,
+      providerName: 'openai',
+      systemPrompt: STRUCTURED_SYSTEM_PROMPT,
     });
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`${errorPrefix}: ${response.status} ${errorText}`);
-    }
+  analyzeVision(input: AiVisionInput): Promise<AiProviderResult> {
+    const { apiKey, model } = this.aiConfig.getOpenAiVisionConfig();
+    return postOpenAiVision(
+      OPENAI_URL,
+      apiKey,
+      model,
+      this.visionPromptBuilder.build(input),
+      input.images,
+      { providerName: 'openai' },
+    );
+  }
 
-    const payload = (await response.json()) as OpenAiCompatibleResponse;
-    const content = payload.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error('OpenAI vision returned an empty response');
-    }
-
-    return content;
+  analyzeVisionContext(input: AiVisionInput): Promise<AiProviderResult> {
+    const { apiKey, model } = this.aiConfig.getOpenAiVisionConfig();
+    return postOpenAiVision(
+      OPENAI_URL,
+      apiKey,
+      model,
+      this.visionPromptBuilder.buildContext(input),
+      input.images,
+      { providerName: 'openai' },
+    );
   }
 }

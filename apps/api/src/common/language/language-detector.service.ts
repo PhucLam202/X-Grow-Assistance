@@ -17,9 +17,7 @@ export class LanguageDetectorService {
     // stroke (đ), below-diacritic variants, and double-diacritic compounds.
     // Excludes à á è é ì í ò ó ù ú â ê ô which French/Spanish/Italian also use —
     // avoids false-positives from names like "Dembélé" in English posts.
-    if (
-      /[ăặằắẳẵơờớợởỡưừứựửữđạảẹẻịỉọỏụủỳýỵỷỹầấậẩẫềếệểễồốộổỗ]/i.test(text)
-    ) {
+    if (/[ăặằắẳẵơờớợởỡưừứựửữđạảẹẻịỉọỏụủỳýỵỷỹầấậẩẫềếệểễồốộổỗ]/i.test(text)) {
       return 'vi';
     }
     if (/[a-z]/i.test(text)) {

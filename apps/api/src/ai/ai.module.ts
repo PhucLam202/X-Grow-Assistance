@@ -29,6 +29,17 @@ import { OpenRouterProvider } from './providers/openrouter.provider';
     ClaudeProvider,
     OpenRouterProvider,
   ],
-  exports: [AiReplyPackService, AiVisionService],
+  /**
+   * `AiProviderRegistry` được export vì `CandidateGenerationService` (Phase 4)
+   * tự chọn provider và tự xử lý fallback — nó không đi qua
+   * `AiReplyPackService`. Thiếu export này thì `GenerationsModule` không boot
+   * được, và unit test không bắt được vì chúng dựng service bằng tay.
+   */
+  exports: [
+    AiConfigService,
+    AiProviderRegistry,
+    AiReplyPackService,
+    AiVisionService,
+  ],
 })
 export class AiModule {}

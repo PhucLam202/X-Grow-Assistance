@@ -9,5 +9,6 @@ import { AnalyticsService } from './analytics.service';
   imports: [AuthModule, MongoModule, AiModule],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

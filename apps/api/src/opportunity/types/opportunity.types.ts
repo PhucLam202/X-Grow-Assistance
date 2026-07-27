@@ -1,7 +1,6 @@
 import type {
   FeedCandidateMetrics,
   FeedCandidateTimestamps,
-  FeedContentType,
   StoredFeedCandidate,
 } from '../../feed-intelligence/types/feed-intelligence.types';
 
@@ -53,7 +52,7 @@ export type OpportunityCandidate = {
   detectedLanguage?: string;
   detectedNiche?: string;
   detectedTopic?: string;
-  contentType?: FeedContentType | string;
+  contentType?: string;
   media?: OpportunityMedia[];
   mediaCount?: number;
   metrics?: FeedCandidateMetrics;
@@ -112,3 +111,36 @@ export function candidateFromStoredFeedCandidate(
     feedScore: candidate.score,
   };
 }
+
+export type OpportunityScoreResponse = {
+  postId: string;
+  total: number;
+  label: OpportunityLabel;
+  components: Record<string, number>;
+  reasons: string[];
+  scoreVersion: string;
+  expiresAt: string;
+  cached: boolean;
+};
+
+export type OpportunityBatchItem = {
+  postId: string;
+  success: boolean;
+  result?: OpportunityScoreResponse;
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+
+export type OpportunityBatchResponse = {
+  results: OpportunityBatchItem[];
+  metadata: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    cacheHits: number;
+    cacheMisses: number;
+    scoreVersion: string;
+  };
+};

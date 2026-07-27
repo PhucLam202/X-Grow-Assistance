@@ -1,13 +1,6 @@
 import { LanguageDetectorService } from '../common/language/language-detector.service';
 import { AiDriverService } from './ai-driver.service';
 import { CommentStrategyEngineService } from './comment-strategy-engine.service';
-import { CommentStrategyWriterService } from './driver/comment-strategy-writer.service';
-import { DepthRecommenderService } from './driver/depth-recommender.service';
-import { IntentClassifierService } from './driver/intent-classifier.service';
-import { LanguageRecommenderService } from './driver/language-recommender.service';
-import { SafetySkipDeciderService } from './driver/safety-skip-decider.service';
-import { ToneRecommenderService } from './driver/tone-recommender.service';
-import { ZoneClassifierService } from './driver/zone-classifier.service';
 import { AuthorContinuationExtractorService } from './tools/author-continuation-extractor.service';
 import { ContextPackageNormalizerService } from './tools/context-package-normalizer.service';
 import { ContinuationSignalDetectorService } from './tools/continuation-signal-detector.service';
@@ -22,13 +15,7 @@ describe('CommentStrategyEngineService', () => {
       new RelationshipContextExtractorService(),
     );
     const aiDriver = new AiDriverService(
-      new ZoneClassifierService(),
-      new IntentClassifierService(),
-      new LanguageRecommenderService(new LanguageDetectorService()),
-      new ToneRecommenderService(),
-      new DepthRecommenderService(),
-      new SafetySkipDeciderService(),
-      new CommentStrategyWriterService(),
+      new LanguageDetectorService(),
       signalDetector,
     );
     const engine = new CommentStrategyEngineService(

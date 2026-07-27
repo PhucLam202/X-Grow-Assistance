@@ -9,23 +9,22 @@ const TONE_INSTRUCTIONS: Record<string, string> = {
   short_native: `
 ## TONE: Short Native Reply
 Identity: A real user casually tapping out a reply on their phone.
-Voice: Minimal, unpolished, direct — exactly how a native speaker would comment
-in 2–12 words without thinking too hard.
+Voice: Natural, unpolished, direct — exactly how a native speaker would comment
+in 6–18 words with genuine personality.
 
 Rules:
-- Maximum ~12 words per suggestion. Shorter is almost always better.
-- Zero formal structure. No full sentences required.
+- Write complete, natural thoughts — typically 6 to 18 words (1 concise sentence or punchy phrase).
+- Avoid artificially truncated 2–3 word stubs that feel incomplete or robotic.
 - Light slang or colloquial phrasing is encouraged if the target language supports it.
-- Sound lazy in a cool way — not trying too hard.
-- One authentic reaction per comment.
+- Sound relaxed, authentic, and engaged.
+- One authentic reaction or observation per comment.
 
 Never write:
-- "Great post!", "Thanks for sharing!", or any opener phrase.
-- Multiple clauses joined by "and" or "but".
-- Motivational or supportive statements.
+- "Great post!", "Thanks for sharing!", or any corporate opener phrase.
+- Motivational or generic filler statements.
 
-Output feel examples (EN): "too real", "this is the way", "called it"
-Output feel examples (VI): "đúng vibe", "chuẩn không cần chỉnh", "y chang tui"
+Output feel examples (EN): "this hit way too close to home honestly", "yeah no chance i would have solved that either"
+Output feel examples (VI): "nhìn cái này xong tự nhiên thấy đồng cảm ghê", "đúng kiểu chữ xấu là bó tay thật luôn"
 `,
 
   casual_supportive: `
@@ -399,7 +398,9 @@ ${buildImageSection(input.images)}
 ════════════════════════════════════════
 POST TEXT
 ════════════════════════════════════════
-${dto.post.text}
+<post_content>
+${dto.post.text.slice(0, 3000)}
+</post_content>
 
 ════════════════════════════════════════
 NICHE-SPECIFIC IMAGE SIGNALS
@@ -503,22 +504,24 @@ ${buildImageSection(input.images)}
 ════════════════════════════════════════
 POST TEXT
 ════════════════════════════════════════
-${dto.post.text}
+<post_content>
+${dto.post.text.slice(0, 3000)}
+</post_content>
 
 ════════════════════════════════════════
 CORE RULES (always apply, no exceptions)
 ════════════════════════════════════════
 1. Analyze both the post text and image before generating any suggestion.
-2. Every suggestion must be specific to THIS post and THIS image — not reusable elsewhere.
+2. STRICT RELEVANCE: Every single suggestion MUST be deeply relevant and anchored to both the post text AND the visual image details. Never output generic filler comments that could fit any post.
 3. If the image is a meme or visual joke: the best reply catches the visual punchline.
 4. If the image contradicts the text: use that tension as the reply angle.
 5. Sound like a real person who actually looked at the image, not just the text.
-6. Keep replies short unless the tone explicitly allows more depth.
+6. Write natural, expressive, and complete replies (typically 8–25 words for standard comments, 6–18 words for short native replies). Avoid artificially truncated 2–3 word stubs unless the post itself is a 1-word meme.
 7. Forbidden: "Great post", "Nice photo", "Thanks for sharing", "So inspiring",
    "Beautiful shot", "Love this" — unless tied to a specific, concrete detail.
 8. No corporate tone. No explaining the joke. No forced hashtags.
 9. Do not claim visual details you cannot confirm from the image.
-10. Generate 6–8 candidates internally, then return only the top ${dto.options.maxSuggestions} scored.
+10. MANDATORY QUANTITY & RELEVANCE: You MUST return EXACTLY ${dto.options.maxSuggestions} suggestions in the "suggestions" array. All ${dto.options.maxSuggestions} suggestions MUST be 100% relevant to this exact post+image, offering 3 distinct, high-quality angles (e.g. Angle 1: Direct reaction/agreement, Angle 2: Insightful observation/question, Angle 3: Natural witty/relatable reframe). Returning generic or irrelevant filler is strictly forbidden.
 11. Return ONLY valid JSON — no markdown fences, no extra text outside the JSON.
 
 Vietnamese explanation style:
@@ -599,7 +602,7 @@ IMPORTANT FINAL CHECKS:
 - translation, summary, context, commentStrategy must be in: ${translationLanguage}.
 - meaningVi and whyVisible must always be in natural Vietnamese, not literal translationese.
 - whyItWorks must be specific to the post+image and avoid generic advice.
-- Return exactly ${dto.options.maxSuggestions} suggestions (or fewer only if the post+image lacks enough context).
+- MANDATORY: Return EXACTLY ${dto.options.maxSuggestions} suggestions in the "suggestions" array. Never return fewer than ${dto.options.maxSuggestions} items.
 - No markdown. Return raw JSON only.
 `;
   }

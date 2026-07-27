@@ -4,14 +4,18 @@ import {
   CommentSuggestion,
   ReplyCandidateScore,
 } from '../../reply-pack/types/reply-pack.types';
+import { jsonrepair } from 'jsonrepair';
 
-function clampScore(value: unknown, fallback: number): number {
-  const numberValue = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numberValue)) return fallback;
-  return Math.max(0, Math.min(100, Math.round(numberValue)));
+export function clampScore(value: unknown, fallback: number): number {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-function fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
+export function fallbackScore(
+  text: string,
+  whyItWorks: string,
+): ReplyCandidateScore {
   const normalized = text.trim();
   const length = normalized.length;
   const hasHook = /\?|😂|🤣|lol|lmao|why|how|this|that/i.test(normalized);
@@ -30,7 +34,6 @@ function fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
       engagementHook * 0.15,
     60,
   );
-
   return {
     total,
     postFit,
@@ -44,7 +47,7 @@ function fallbackScore(text: string, whyItWorks: string): ReplyCandidateScore {
   };
 }
 
-function normalizeScore(
+export function normalizeScore(
   score: unknown,
   text: string,
   whyItWorks: string,
@@ -68,7 +71,6 @@ function normalizeScore(
       engagementHook * 0.15,
     fallback.total,
   );
-
   return {
     total: clampScore(raw.total, calculatedTotal),
     postFit,
@@ -86,62 +88,69 @@ function normalizeScore(
 @Injectable()
 export class ReplyPackJsonParser {
   parse(content: string): AiReplyPackPayload {
-    const normalized = content.trim();
-    const json = normalized.startsWith('```')
-      ? normalized.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-      : normalized;
+    const raw = JSON.parse(jsonrepair(content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim())) as Record<string, unknown>;
 
-    const parsed = JSON.parse(json) as Partial<AiReplyPackPayload> & {
-      suggestions?: Array<Partial<CommentSuggestion>>;
-    };
+    const translation = String(raw.translation ?? raw.translation_vi ?? '');
+    const summary = String(
+      raw.summary ?? raw.text_summary ?? raw.textSummary ?? '',
+    );
+    const context = String(
+      raw.context ?? raw.combined_context ?? raw.combinedContext ?? '',
+    );
+    const theme = String(raw.theme ?? 'general');
+    const topic = String(raw.topic ?? 'general');
+    const sentiment = String(raw.sentiment ?? 'neutral');
+    const commentStrategy = String(
+      raw.commentStrategy ?? raw.comment_strategy ?? raw.strategy ?? '',
+    );
 
-    if (
-      typeof parsed.translation !== 'string' ||
-      typeof parsed.summary !== 'string' ||
-      typeof parsed.context !== 'string' ||
-      typeof parsed.theme !== 'string' ||
-      typeof parsed.topic !== 'string' ||
-      typeof parsed.sentiment !== 'string' ||
-      typeof parsed.commentStrategy !== 'string' ||
-      !Array.isArray(parsed.suggestions)
-    ) {
-      throw new Error('AI payload has an invalid shape');
+    const rawSuggestions = Array.isArray(raw.suggestions)
+      ? raw.suggestions
+      : [];
+
+    // ponytail: drop half-written items (truncated JSON) instead of failing the whole pack
+    const suggestions: CommentSuggestion[] = rawSuggestions.flatMap((item) => {
+      const s = (item && typeof item === 'object' ? item : {}) as Record<
+        string,
+        unknown
+      >;
+      const text = String(s.text ?? s.comment ?? s.content ?? '').trim();
+      if (!text) return [];
+
+      const meaningVi = String(
+        s.meaningVi ?? s.meaning_vi ?? s.meaning ?? '',
+      ).trim();
+      const tone = String(s.tone ?? 'short_native').trim();
+      const whyItWorks = String(
+        s.whyItWorks ?? s.why_it_works ?? s.reason ?? '',
+      ).trim();
+      const risk = s.risk === 'medium' || s.risk === 'high' ? s.risk : 'low';
+
+      return [
+        {
+          text,
+          meaningVi,
+          tone,
+          risk,
+          whyItWorks,
+          score: normalizeScore(s.score, text, whyItWorks),
+        },
+      ];
+    });
+
+    if (suggestions.length === 0) {
+      throw new Error('AI payload contains no suggestions');
     }
 
     return {
-      translation: parsed.translation,
-      summary: parsed.summary,
-      context: parsed.context,
-      theme: parsed.theme,
-      topic: parsed.topic,
-      sentiment: parsed.sentiment,
-      commentStrategy: parsed.commentStrategy,
-      suggestions: parsed.suggestions.map((suggestion) => {
-        if (
-          typeof suggestion.text !== 'string' ||
-          typeof suggestion.meaningVi !== 'string' ||
-          typeof suggestion.tone !== 'string' ||
-          typeof suggestion.whyItWorks !== 'string'
-        ) {
-          throw new Error('AI suggestion has an invalid shape');
-        }
-
-        return {
-          text: suggestion.text,
-          meaningVi: suggestion.meaningVi,
-          tone: suggestion.tone,
-          risk:
-            suggestion.risk === 'medium' || suggestion.risk === 'high'
-              ? suggestion.risk
-              : 'low',
-          whyItWorks: suggestion.whyItWorks,
-          score: normalizeScore(
-            (suggestion as Partial<CommentSuggestion>).score,
-            suggestion.text,
-            suggestion.whyItWorks,
-          ),
-        };
-      }),
+      translation,
+      summary,
+      context,
+      theme,
+      topic,
+      sentiment,
+      commentStrategy,
+      suggestions,
     };
   }
 }

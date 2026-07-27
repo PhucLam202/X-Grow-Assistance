@@ -29,7 +29,9 @@ export class CommentComposerService {
   async fetchUserMemory(userId: string): Promise<UserMemoryRef | undefined> {
     try {
       const db = await this.mongoService.db();
-      const doc = await db.collection('comment_memory_profiles').findOne({ userId });
+      const doc = await db
+        .collection('comment_memory_profiles')
+        .findOne({ userId });
       if (!doc) return undefined;
       return {
         preferredTones: (doc.preferredTones as string[]) ?? [],
@@ -61,7 +63,9 @@ export class CommentComposerService {
 
     // Run all style AI calls concurrently — reduces latency from N×T to max(T).
     const settled = await Promise.allSettled(
-      styles.map((style) => this.generateForStyle(composerInput, style, userMemory)),
+      styles.map((style) =>
+        this.generateForStyle(composerInput, style, userMemory),
+      ),
     );
 
     const candidates: GeneratedComment[] = [];
@@ -97,7 +101,10 @@ export class CommentComposerService {
     composerInput: ComposerInput,
     style: CommentStyle,
     userMemory?: UserMemoryRef,
-  ): Promise<{ generatedCandidates: GeneratedComment[]; styleWarnings: string[] }> {
+  ): Promise<{
+    generatedCandidates: GeneratedComment[];
+    styleWarnings: string[];
+  }> {
     const dto = this.replyPackAdapter.toDto(composerInput, style);
     const replyPack = await this.aiReplyPackService.generateReplyPack({
       dto: {
@@ -114,7 +121,10 @@ export class CommentComposerService {
       userMemory,
     });
 
-    const generatedCandidates = this.fromSuggestions(style, replyPack.suggestions);
+    const generatedCandidates = this.fromSuggestions(
+      style,
+      replyPack.data.suggestions,
+    );
 
     if (generatedCandidates.length === 0) {
       return {
