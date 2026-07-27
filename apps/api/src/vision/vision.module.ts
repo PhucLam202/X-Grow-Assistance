@@ -9,5 +9,6 @@ import { VisionAnalyzeService } from './vision-analyze.service';
   imports: [AiModule, ImageModule, LanguageModule],
   controllers: [VisionController],
   providers: [VisionAnalyzeService],
+  exports: [VisionAnalyzeService],
 })
 export class VisionModule {}

@@ -14,12 +14,15 @@ export class PersonalRecommendationController {
   ) {}
 
   @Get('personal-profile')
-  getPersonalProfile(@CurrentUser() user: AuthUser, @Query('userId') _userId?: string) {
+  getPersonalProfile(@CurrentUser() user: AuthUser) {
     return this.personalRecommendationService.getPersonalProfile(user.userId);
   }
 
   @Post('performance/manual-update')
-  manualUpdate(@Body() dto: ManualPerformanceUpdateDto, @CurrentUser() user: AuthUser) {
+  manualUpdate(
+    @Body() dto: ManualPerformanceUpdateDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.personalRecommendationService.manualPerformanceUpdate({
       ...dto,
       userId: user.userId,
@@ -27,7 +30,10 @@ export class PersonalRecommendationController {
   }
 
   @Post('personal-recommendation/ingest-action-log')
-  ingestActionLog(@Body() dto: IngestActionLogDto, @CurrentUser() user: AuthUser) {
+  ingestActionLog(
+    @Body() dto: IngestActionLogDto,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.personalRecommendationService.ingestActionLog({
       ...dto,
       userId: user.userId,
@@ -35,12 +41,12 @@ export class PersonalRecommendationController {
   }
 
   @Get('comment-memory')
-  getCommentMemory(@CurrentUser() user: AuthUser, @Query('userId') _userId?: string) {
+  getCommentMemory(@CurrentUser() user: AuthUser) {
     return this.personalRecommendationService.getCommentMemory(user.userId);
   }
 
   @Post('comment-memory/rebuild')
-  rebuildCommentMemory(@CurrentUser() user: AuthUser, @Body('userId') _userId?: string) {
+  rebuildCommentMemory(@CurrentUser() user: AuthUser) {
     return this.personalRecommendationService.rebuildCommentMemory(user.userId);
   }
 
@@ -48,7 +54,6 @@ export class PersonalRecommendationController {
   checkCommentSimilarity(
     @Body('commentText') commentText: string,
     @CurrentUser() user: AuthUser,
-    @Body('userId') _userId?: string,
   ) {
     return this.personalRecommendationService.checkCommentSimilarity(
       commentText,

@@ -36,11 +36,8 @@ type ChromeRuntime = {
 
 declare const chrome: ChromeRuntime;
 
-let lastSelectedPost: ExtractedPost | undefined;
-let lastSelectedPostContext: ExtractedPostContext | undefined;
-
 const MAX_CONTEXT_CACHE_ITEMS = 200;
-const CONTEXT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CONTEXT_CACHE_TTL_MS = 15 * 60 * 1000;
 
 function createContextCacheKey(post: ExtractedPost): string | undefined {
   const key = post.tweetId ?? post.postUrl;
@@ -89,9 +86,9 @@ chrome.runtime?.onInstalled?.addListener(() => {
 
 chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   if (message.type === 'XCA_SELECTED_POST') {
-    lastSelectedPost = message.post;
-    lastSelectedPostContext = message.postContext;
-    chrome.storage?.local?.set({ [SELECTED_POST_STORAGE_KEY]: message.postContext ?? message.post });
+    chrome.storage?.local?.set({
+      [SELECTED_POST_STORAGE_KEY]: { post: message.post, postContext: message.postContext },
+    });
     cachePostContext(message.post, message.postContext);
     return;
   }
@@ -102,6 +99,12 @@ chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'XCA_GET_SELECTED_POST') {
-    sendResponse({ post: lastSelectedPost, postContext: lastSelectedPostContext });
+    chrome.storage?.local?.get(SELECTED_POST_STORAGE_KEY, (items) => {
+      const stored = items[SELECTED_POST_STORAGE_KEY] as
+        | { post?: ExtractedPost; postContext?: ExtractedPostContext }
+        | undefined;
+      sendResponse({ post: stored?.post, postContext: stored?.postContext });
+    });
+    return true; // keep message channel open for async response
   }
 });

@@ -35,7 +35,7 @@ type ChromeRuntime = {
   };
   storage?: {
     local?: {
-      get(key: string, callback: (items: Record<string, unknown>) => void): void;
+      get(key: string): Promise<Record<string, unknown>>;
     };
   };
 };
@@ -51,6 +51,7 @@ const shouldInstall = installState.__xcaContentScriptVersion !== CONTENT_SCRIPT_
 
 let lastSentKey: string | null = null;
 let clickTimer: number | null = null;
+let scrollEndTimer: number | null = null;
 let lastUrl = location.href;
 const visibleTimers = new WeakMap<Element, number>();
 const cachedArticles = new WeakSet<Element>();
@@ -58,9 +59,12 @@ const autoSelectedArticles = new WeakSet<Element>();
 const overlayNodes = new WeakMap<Element, HTMLDivElement>();
 const pendingOverlayScores = new Map<string, OpportunityScore>();
 const pendingComments: PendingPublishedComment[] = [];
+// ponytail: cache article→key so findArticleKey never re-parses the DOM; articlesByKey enables O(1) overlay lookup
+const articleKeyCache = new WeakMap<Element, string>();
+const articlesByKey = new Map<string, Element>();
 
-const AUTO_SELECT_VISIBLE_RATIO = 0.65;
-const AUTO_SELECT_DELAY_MS = 1000;
+const AUTO_SELECT_VISIBLE_RATIO = 0.2;
+const AUTO_SELECT_DELAY_MS = 300;
 const PENDING_COMMENT_TTL_MS = 2 * 60 * 1000;
 
 function isContentAuthSession(value: unknown): value is ContentAuthSession {
@@ -74,13 +78,9 @@ function isContentAuthSession(value: unknown): value is ContentAuthSession {
 
 async function getContentAuthSession(): Promise<ContentAuthSession | null> {
   if (!chrome.storage?.local) return null;
-
-  return new Promise((resolve) => {
-    chrome.storage?.local?.get(AUTH_SESSION_STORAGE_KEY, (items) => {
-      const value = items[AUTH_SESSION_STORAGE_KEY];
-      resolve(isContentAuthSession(value) ? value : null);
-    });
-  });
+  const items = await chrome.storage.local.get(AUTH_SESSION_STORAGE_KEY);
+  const value = items[AUTH_SESSION_STORAGE_KEY];
+  return isContentAuthSession(value) ? value : null;
 }
 
 function createPostKeyFromPost(post: ExtractedPost): string {
@@ -118,26 +118,56 @@ function getVisibleRatio(element: Element): number {
   return totalArea > 0 ? visibleArea / totalArea : 0;
 }
 
+function getStatusTweetIdFromUrl(): string | undefined {
+  if (!location.pathname.includes('/status/')) return undefined;
+  return location.pathname.match(/\/status\/(\d+)/)?.[1];
+}
+
 function findBestCurrentArticle(): Element | null {
   const articles = [...document.querySelectorAll('article')];
+  if (articles.length === 0) return null;
+
+  const currentStatusId = getStatusTweetIdFromUrl();
+
+  if (currentStatusId) {
+    // On a status detail page (x.com/user/status/123456), the main post is the focal tweet of this URL.
+    for (const article of articles) {
+      const statusLinks = article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]');
+      for (const link of statusLinks) {
+        if (link.href.includes(`/status/${currentStatusId}`)) {
+          return article;
+        }
+      }
+    }
+    // Fallback: on a status page, the first article is always the main focal tweet
+    return articles[0];
+  }
+
+  // On feed pages (/home, /search, /profile): find the article best positioned in viewport
   let bestArticle: Element | null = null;
-  let bestScore = 0;
+  let bestScore = -9999;
 
   articles.forEach((article) => {
     const ratio = getVisibleRatio(article);
+    const rect = article.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > window.innerHeight) return;
+
+    const topDistancePenalty = Math.max(0, rect.top) / 10;
     const mediaCount = article.querySelectorAll(
       'img[src*="pbs.twimg.com/media"], img[src*="pbs.twimg.com/amplify_video_thumb"], [data-testid="tweetPhoto"]',
     ).length;
     const textLength =
       article.querySelector('[data-testid="tweetText"]')?.textContent?.trim().length ?? 0;
-    const score = ratio * 100 + mediaCount * 45 + Math.min(textLength, 600) / 12;
+
+    const score = ratio * 100 - topDistancePenalty + Math.min(mediaCount, 2) * 10 + Math.min(textLength, 200) / 20;
+
     if (score > bestScore) {
       bestScore = score;
       bestArticle = article;
     }
   });
 
-  return bestScore > 20 ? bestArticle : null;
+  return bestArticle ?? articles[0] ?? null;
 }
 
 function detectCurrentPost(): ExtractedPost | null {
@@ -186,15 +216,11 @@ function scanVisibleFeed(): FeedSnapshot {
 
 function cacheVisiblePost(article: Element): void {
   if (cachedArticles.has(article)) return;
-  const post = extractPostFromArticle(article, 'visible_cache');
-  if (!post) return;
   const postContext = extractPostContextFromArticle(article, 'visible_cache') ?? undefined;
+  const post = postContext?.mainPost;
+  if (!post) return;
   cachedArticles.add(article);
-  chrome.runtime?.sendMessage({
-    type: 'XCA_CACHE_POST_CONTEXT',
-    post,
-    postContext,
-  });
+  chrome.runtime?.sendMessage({ type: 'XCA_CACHE_POST_CONTEXT', post, postContext });
 }
 
 function autoSelectVisiblePost(article: Element): void {
@@ -205,21 +231,12 @@ function autoSelectVisiblePost(article: Element): void {
   cacheVisiblePost(article);
 }
 
-function getScoreAccentColor(label: OpportunityScore['label']): string {
-  if (label === 'urgent') return '#d12f2f';
-  if (label === 'high') return '#f08a24';
-  if (label === 'medium') return '#1d9bf0';
-  if (label === 'low') return '#7a8aa0';
-  return '#a7b0bf';
-}
-
-function getScoreLabelVi(label: OpportunityScore['label']): string {
-  if (label === 'urgent') return 'Ưu tiên ngay';
-  if (label === 'high') return 'Cơ hội tốt';
-  if (label === 'medium') return 'Có thể thử';
-  if (label === 'low') return 'Ưu tiên thấp';
-  return 'Nên bỏ qua';
-}
+const SCORE_COLOR: Record<string, string> = {
+  urgent: '#d12f2f', high: '#f08a24', medium: '#1d9bf0', low: '#7a8aa0',
+};
+const SCORE_LABEL_VI: Record<string, string> = {
+  urgent: 'Ưu tiên ngay', high: 'Cơ hội tốt', medium: 'Có thể thử', low: 'Ưu tiên thấp',
+};
 
 function ensureRelativePosition(article: Element): void {
   if (window.getComputedStyle(article).position === 'static') {
@@ -228,8 +245,14 @@ function ensureRelativePosition(article: Element): void {
 }
 
 function findArticleKey(article: Element): string | undefined {
+  const cached = articleKeyCache.get(article);
+  if (cached) return cached;
   const post = extractPostFromArticle(article, 'visible_cache');
-  return post ? createPostKeyFromPost(post) : undefined;
+  if (!post) return undefined;
+  const key = createPostKeyFromPost(post);
+  articleKeyCache.set(article, key);
+  articlesByKey.set(key, article);
+  return key;
 }
 
 function mountOverlay(article: Element, score: OpportunityScore): void {
@@ -260,13 +283,13 @@ function mountOverlay(article: Element, score: OpportunityScore): void {
     overlayNodes.set(article, overlay);
   }
 
-  const accent = getScoreAccentColor(score.label);
+  const accent = SCORE_COLOR[score.label] ?? '#a7b0bf';
   overlay.style.background = `linear-gradient(135deg, ${accent}, rgba(17, 24, 39, 0.92))`;
   overlay.innerHTML = `
     <span style="display:inline-flex;align-items:center;justify-content:center;width:8px;height:30px;border-radius:999px;background:${accent};box-shadow:0 0 0 2px rgba(255,255,255,0.18);"></span>
     <span style="display:flex;flex-direction:column;line-height:1.05;gap:2px;">
       <strong style="font-size:13px;">${score.total}/100</strong>
-      <span style="font-size:11px;opacity:0.92;">${getScoreLabelVi(score.label)}</span>
+      <span style="font-size:11px;opacity:0.92;">${SCORE_LABEL_VI[score.label] ?? 'Nên bỏ qua'}</span>
     </span>
   `;
 }
@@ -281,17 +304,31 @@ function applyOverlayToArticle(article: Element): boolean {
   return true;
 }
 
-function applyPendingOverlays(root: ParentNode = document): void {
-  root.querySelectorAll('article').forEach((article) => {
-    applyOverlayToArticle(article);
+function applyPendingOverlays(): void {
+  pendingOverlayScores.forEach((score, key) => {
+    const article = articlesByKey.get(key);
+    if (article) mountOverlay(article, score);
   });
 }
 
 function detectDetailPagePost(): void {
   if (!location.pathname.includes('/status/')) return;
   const bestArticle = findBestCurrentArticle();
-  if (!bestArticle) return;
-  sendSelectedPost(bestArticle, 'detail_page');
+  if (bestArticle) {
+    sendSelectedPost(bestArticle, 'detail_page');
+    return;
+  }
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    const article = findBestCurrentArticle();
+    if (article) {
+      sendSelectedPost(article, 'detail_page');
+      window.clearInterval(timer);
+    } else if (attempts >= 6) {
+      window.clearInterval(timer);
+    }
+  }, 350);
 }
 
 function normalizeComparableText(text: string): string {
@@ -441,6 +478,23 @@ if (shouldInstall) {
     true,
   );
 
+  // Scroll-end fallback: when scrolling stops, pick the best visible article.
+  // Catches posts the IntersectionObserver may miss during fast scroll.
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (scrollEndTimer) window.clearTimeout(scrollEndTimer);
+      scrollEndTimer = window.setTimeout(() => {
+        scrollEndTimer = null;
+        const article = findBestCurrentArticle();
+        if (!article) return;
+        if (autoSelectedArticles.has(article)) return;
+        autoSelectVisiblePost(article);
+      }, AUTO_SELECT_DELAY_MS);
+    },
+    { passive: true },
+  );
+
   chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
     if (message.type === 'XCA_PING') {
       sendResponse({ ok: true });
@@ -506,6 +560,7 @@ if (shouldInstall) {
           if (visibleTimers.has(entry.target) || autoSelectedArticles.has(entry.target)) return;
           const timer = window.setTimeout(() => {
             visibleTimers.delete(entry.target);
+            if (!document.contains(entry.target)) return;
             autoSelectVisiblePost(entry.target);
           }, AUTO_SELECT_DELAY_MS);
           visibleTimers.set(entry.target, timer);

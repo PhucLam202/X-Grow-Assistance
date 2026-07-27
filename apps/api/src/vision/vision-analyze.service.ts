@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AiReplyPackService } from '../ai/ai-reply-pack.service';
 import { AiVisionService } from '../ai/ai-vision.service';
+import { AiExecutionResult } from '../ai/ai.types';
 import { LanguageDetectorService } from '../common/language/language-detector.service';
 import { ImageFetchService } from '../image/image-fetch.service';
 import { GenerateReplyPackDto } from '../reply-pack/dto/generate-reply-pack.dto';
@@ -22,7 +23,9 @@ export class VisionAnalyzeService {
     private readonly languageDetector: LanguageDetectorService,
   ) {}
 
-  async analyze(dto: AnalyzeVisionDto): Promise<VisionReplyPack> {
+  async analyze(
+    dto: AnalyzeVisionDto,
+  ): Promise<AiExecutionResult<VisionReplyPack>> {
     const contextualDto = this.withContextualPostText(dto);
     const detectedLanguage = this.languageDetector.detect(
       getTextForLanguageDetection(dto.post.text, dto.postContext),
@@ -48,7 +51,7 @@ export class VisionAnalyzeService {
         })),
       );
 
-      return this.aiVisionService.analyzeVision({
+      return await this.aiVisionService.analyzeVision({
         dto: contextualDto,
         images,
         detectedLanguage,
@@ -56,18 +59,28 @@ export class VisionAnalyzeService {
         targetLanguage,
       });
     } catch (error) {
-      const fallback = await this.generateTextOnlyFallback(
+      const fallbackResult = await this.generateTextOnlyFallback(
         dto,
         detectedLanguage,
         targetLanguage,
         translationLanguage,
       );
 
-      return this.toFallbackVisionReplyPack(fallback, error);
+      return {
+        data: this.toFallbackVisionReplyPack(fallbackResult.data, error),
+        execution: {
+          ...fallbackResult.execution,
+          fallbackUsed: true,
+          fallbackReason:
+            error instanceof Error ? error.message : 'Vision analysis failed',
+        },
+      };
     }
   }
 
-  async analyzeContext(dto: AnalyzeVisionDto): Promise<VisionContext> {
+  async analyzeContext(
+    dto: AnalyzeVisionDto,
+  ): Promise<AiExecutionResult<VisionContext>> {
     const contextualDto = this.withContextualPostText(dto);
     const detectedLanguage = this.languageDetector.detect(
       getTextForLanguageDetection(dto.post.text, dto.postContext),
@@ -93,7 +106,7 @@ export class VisionAnalyzeService {
         })),
       );
 
-      return this.aiVisionService.analyzeVisionContext({
+      return await this.aiVisionService.analyzeVisionContext({
         dto: contextualDto,
         images,
         detectedLanguage,
@@ -101,25 +114,35 @@ export class VisionAnalyzeService {
         targetLanguage,
       });
     } catch (error) {
-      const fallback = await this.generateTextOnlyFallback(
+      const fallbackResult = await this.generateTextOnlyFallback(
         dto,
         detectedLanguage,
         targetLanguage,
         translationLanguage,
       );
 
-      return this.toFallbackVisionContext(
-        fallback,
-        error,
-        detectedLanguage,
-        translationLanguage,
-      );
+      return {
+        data: this.toFallbackVisionContext(
+          fallbackResult.data,
+          error,
+          detectedLanguage,
+          translationLanguage,
+        ),
+        execution: {
+          ...fallbackResult.execution,
+          fallbackUsed: true,
+          fallbackReason:
+            error instanceof Error
+              ? error.message
+              : 'Vision context analysis failed',
+        },
+      };
     }
   }
 
   async generateFromContext(
     dto: GenerateFromVisionContextDto,
-  ): Promise<VisionReplyPack> {
+  ): Promise<AiExecutionResult<VisionReplyPack>> {
     const detectedLanguage = this.languageDetector.detect(
       getTextForLanguageDetection(dto.post.text, dto.postContext),
     );
@@ -144,17 +167,20 @@ export class VisionAnalyzeService {
       translationLanguage,
     };
 
-    const replyPack = await this.aiReplyPackService.generateReplyPack({
+    const replyPackResult = await this.aiReplyPackService.generateReplyPack({
       dto: replyPackDto,
       detectedLanguage,
       targetLanguage,
     });
 
     return {
-      ...replyPack,
-      analysisMode: 'vision',
-      imageAnalysis: dto.visionContext.imageAnalysis,
-      combinedContext: dto.visionContext.combinedContext,
+      data: {
+        ...replyPackResult.data,
+        analysisMode: 'vision',
+        imageAnalysis: dto.visionContext.imageAnalysis,
+        combinedContext: dto.visionContext.combinedContext,
+      },
+      execution: replyPackResult.execution,
     };
   }
 
@@ -163,7 +189,7 @@ export class VisionAnalyzeService {
     detectedLanguage: ReturnType<LanguageDetectorService['detect']>,
     targetLanguage: string,
     translationLanguage: 'vi' | 'en',
-  ): Promise<ReplyPack> {
+  ): Promise<AiExecutionResult<ReplyPack>> {
     const replyPackDto: GenerateReplyPackDto & {
       translationLanguage: 'vi' | 'en';
     } = {

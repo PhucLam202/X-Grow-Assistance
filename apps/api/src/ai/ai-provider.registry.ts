@@ -19,9 +19,13 @@ export class AiProviderRegistry {
     openRouterProvider: OpenRouterProvider,
   ) {
     this.providers = new Map(
-      [openAiProvider, deepSeekProvider, geminiProvider, claudeProvider, openRouterProvider].map(
-        (provider) => [provider.name, provider],
-      ),
+      [
+        openAiProvider,
+        deepSeekProvider,
+        geminiProvider,
+        claudeProvider,
+        openRouterProvider,
+      ].map((provider) => [provider.name, provider]),
     );
   }
 

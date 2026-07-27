@@ -1,3 +1,17 @@
+import type {
+  CommentIntent,
+  CommentIntentSelection,
+  EmojiLevel,
+  EnergyLevel,
+  Niche,
+  NicheClassificationMethod,
+  NicheSelection,
+  ReplyCount,
+  ReplyLanguage,
+  ReplyLength,
+  ToneSelection,
+} from "./generationOptions";
+
 export type RiskLevel = "low" | "medium" | "high";
 
 export type ReplyCandidateScore = {
@@ -668,3 +682,134 @@ export type CommentOverview = {
     usageRate: number;
   };
 };
+
+// ── Unified reply-packs endpoint types ──────────────────────────────────────
+
+export type CreateReplyPackPayload = {
+  post: {
+    platform: "x";
+    postId: string;
+    url?: string;
+    text: string;
+    author?: { name?: string; handle?: string };
+    media?: Array<{ type: "image" | "video" | "gif"; url: string }>;
+    contentType: "text" | "image" | "video" | "mixed" | "unknown";
+    postType: "original" | "reply" | "quote" | "repost";
+    capturedAt: string;
+    extractorVersion: string;
+  };
+  /**
+   * Mirrors `ReplyOptionsDto`. Every field is optional server-side (defaults
+   * come from `resolveReplyOptions()`), but unknown fields are rejected by
+   * `forbidNonWhitelisted` — do not add anything the DTO does not declare.
+   */
+  options: {
+    niche?: NicheSelection;
+    tone?: ToneSelection;
+    intent?: CommentIntentSelection;
+    length?: ReplyLength;
+    energy?: EnergyLevel;
+    language?: ReplyLanguage;
+    emojiLevel?: EmojiLevel;
+    replyCount?: ReplyCount;
+    explanationLanguage?: ExplanationLanguage;
+    visionEnabled?: boolean;
+    /** @deprecated superseded by `language` */
+    targetLanguage?: TargetCommentLanguage;
+    /** @deprecated superseded by `replyCount` */
+    maxSuggestions?: number;
+  };
+};
+
+/** Phase 6 scores, 0–1 scale. Absent on older generations. */
+export type ReplyCandidateScores = {
+  postFit: number;
+  specificity: number;
+  naturalness: number;
+  nicheFit: number;
+  empathyFit: number;
+  conversationPotential: number;
+  safetyScore: number;
+  userStyleFit: number;
+  ruleScore: number;
+  /** Absent means the model did not self-score — not zero. */
+  modelSelfScore?: number;
+  finalScore: number;
+  scoringMethod: "rule_only" | "rule_plus_self_score";
+};
+
+export type ReplyPackApiSuggestion = {
+  suggestionId: string;
+  text: string;
+  meaningVi?: string;
+  whyItWorks?: string;
+  /** Legacy 0–100 scale; still required by the API contract. */
+  score: {
+    total: number;
+    postFit: number;
+    visibility: number;
+    specificity: number;
+    native: number;
+    engagementHook: number;
+  };
+  risk: RiskLevel;
+  tone: string;
+  niche: string;
+  intent?: CommentIntent;
+  length?: ReplyLength;
+  energy?: EnergyLevel;
+  scores?: ReplyCandidateScores;
+  /** The specific detail in the post this reply anchors to. */
+  referencedConcept?: string;
+};
+
+/** How the API resolved the niche for this generation. */
+export type ReplyPackAnalysis = {
+  detectedLanguage: string;
+  primaryNiche: Niche;
+  secondaryNiches: Niche[];
+  nicheConfidence: number;
+  classificationMethod: NicheClassificationMethod;
+  analysisMode: "text_only" | "text_and_vision";
+  visionUsed: boolean;
+  fallbackUsed: boolean;
+  nicheEvidence?: string[];
+  needsGenerationTimeClassification?: boolean;
+};
+
+export type ReplyPackPipelineMetadata = {
+  generated: number;
+  rejected: number;
+  duplicates: number;
+  retryUsed: boolean;
+  scoringMethod: "rule_only" | "rule_plus_self_score" | "mixed";
+};
+
+export type ReplyPackApiResponse = {
+  generationRunId: string;
+  requestId?: string;
+  analysisMode: "text" | "vision" | "text_only_fallback";
+  analysis?: ReplyPackAnalysis;
+  detectedLanguage?: string;
+  translation?: string;
+  summary?: string;
+  context?: string;
+  theme?: string;
+  topic?: string;
+  sentiment?: string;
+  commentStrategy?: string;
+  suggestions: ReplyPackApiSuggestion[];
+  metadata: {
+    provider: string;
+    model: string;
+    promptVersion: string;
+    latencyMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    estimatedCostUsd?: number;
+    fallbackUsed: boolean;
+    pipeline?: ReplyPackPipelineMetadata;
+  };
+  warnings?: string[];
+};
+

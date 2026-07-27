@@ -12,52 +12,32 @@ export type AuthSession = {
   user: AuthUser;
 };
 
-type ChromeStorageArea = {
-  get(key: string, callback: (items: Record<string, unknown>) => void): void;
-  set(items: Record<string, unknown>, callback?: () => void): void;
-  remove(key: string, callback?: () => void): void;
+// ponytail: typed for MV3 Promise API; @types/chrome not installed in this package
+type ChromeStorageLocal = {
+  get(key: string): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+  remove(key: string): Promise<void>;
 };
 
-function getChromeStorage(): ChromeStorageArea | undefined {
-  const maybeChrome = (globalThis as { chrome?: { storage?: { local?: ChromeStorageArea } } }).chrome;
-  return maybeChrome?.storage?.local;
+function getChromeStorage(): ChromeStorageLocal | undefined {
+  return (globalThis as { chrome?: { storage?: { local?: ChromeStorageLocal } } }).chrome?.storage?.local;
 }
 
 function isAuthSession(value: unknown): value is AuthSession {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      "accessToken" in value &&
-      "user" in value,
-  );
+  return Boolean(value && typeof value === "object" && "accessToken" in value && "user" in value);
 }
 
 export async function getAuthSession(): Promise<AuthSession | null> {
   const storage = getChromeStorage();
   if (!storage) return null;
-
-  return new Promise((resolve) => {
-    storage.get(AUTH_SESSION_STORAGE_KEY, (items) => {
-      const value = items[AUTH_SESSION_STORAGE_KEY];
-      resolve(isAuthSession(value) ? value : null);
-    });
-  });
+  const items = await storage.get(AUTH_SESSION_STORAGE_KEY);
+  return isAuthSession(items[AUTH_SESSION_STORAGE_KEY]) ? items[AUTH_SESSION_STORAGE_KEY] : null;
 }
 
 export async function setAuthSession(session: AuthSession): Promise<void> {
-  const storage = getChromeStorage();
-  if (!storage) return;
-
-  await new Promise<void>((resolve) => {
-    storage.set({ [AUTH_SESSION_STORAGE_KEY]: session }, resolve);
-  });
+  await getChromeStorage()?.set({ [AUTH_SESSION_STORAGE_KEY]: session });
 }
 
 export async function clearAuthSession(): Promise<void> {
-  const storage = getChromeStorage();
-  if (!storage) return;
-
-  await new Promise<void>((resolve) => {
-    storage.remove(AUTH_SESSION_STORAGE_KEY, resolve);
-  });
+  await getChromeStorage()?.remove(AUTH_SESSION_STORAGE_KEY);
 }

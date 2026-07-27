@@ -15,6 +15,29 @@ type UsageEventDocument = StoredUsageEvent & { _id?: ObjectId };
 type UsageEventCountRow = { _id: string; count: number };
 type UsageEventLatencyRow = { _id: null; averageLatencyMs?: number };
 
+export function sanitizeAnalyticsPayload<T extends Record<string, unknown>>(
+  payload: T,
+): T {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    const lower = key.toLowerCase();
+    if (
+      lower.includes('authorization') ||
+      lower.includes('token') ||
+      lower.includes('jwt') ||
+      lower.includes('password') ||
+      lower.includes('apikey') ||
+      lower.includes('secret') ||
+      key === 'req' ||
+      key === 'request'
+    ) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized as T;
+}
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
@@ -26,13 +49,83 @@ export class AnalyticsService {
   ) {}
 
   async track(dto: TrackUsageEventDto, userId: string): Promise<{ ok: true }> {
-    const db = await this.mongoService.db();
-    await db.collection<UsageEventDocument>(USAGE_EVENTS_COLLECTION).insertOne({
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      userId,
-      ...dto,
-    });
+    const sanitized = sanitizeAnalyticsPayload(
+      dto as unknown as Record<string, unknown>,
+    );
+    try {
+      const db = await this.mongoService.db();
+      await db
+        .collection<UsageEventDocument>(USAGE_EVENTS_COLLECTION)
+        .insertOne({
+          id: randomUUID(),
+          createdAt: new Date().toISOString(),
+          userId,
+          ...sanitized,
+        } as UsageEventDocument);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to track usage event (requestId: ${dto.requestId ?? 'unknown'}): ${(error as Error).message}`,
+      );
+    }
+
+    return { ok: true };
+  }
+
+  async trackGenerationEvent(event: {
+    eventName: 'generation_completed' | 'generation_failed';
+    requestId?: string;
+    generationRunId?: string;
+    userId?: string;
+    postId?: string;
+    promptVersion?: string;
+    analysisMode?: 'text' | 'vision' | 'text_only_fallback';
+    fallbackUsed?: boolean;
+    provider?: string;
+    model?: string;
+    latencyMs?: number;
+    errorCode?: string;
+    replyPackUsage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+    visionUsage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+    niche?: string;
+    nicheConfidence?: number;
+    nicheClassificationMethod?: string;
+    needsGenerationTimeClassification?: boolean;
+    /**
+     * Số liệu pipeline Phase 4–6. Không đo được chúng thì không có cách nào
+     * biết validation đang loại quá nhiều hay quá ít trên traffic thật.
+     */
+    candidatesGenerated?: number;
+    candidatesRejected?: number;
+    duplicatesDetected?: number;
+    retryUsed?: boolean;
+    scoringMethod?: string;
+    resolvedPolicyVersion?: string;
+  }): Promise<{ ok: true }> {
+    const sanitized = sanitizeAnalyticsPayload(
+      event as unknown as Record<string, unknown>,
+    );
+    try {
+      const db = await this.mongoService.db();
+      await db
+        .collection<UsageEventDocument>(USAGE_EVENTS_COLLECTION)
+        .insertOne({
+          id: randomUUID(),
+          createdAt: new Date().toISOString(),
+          ...sanitized,
+        } as UsageEventDocument);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to track generation event (requestId: ${event.requestId ?? 'unknown'}): ${(error as Error).message}`,
+      );
+    }
 
     return { ok: true };
   }
@@ -63,6 +156,9 @@ export class AnalyticsService {
   }
 
   async saveFullContext(dto: SaveFullContextDto) {
+    this.logger.log(
+      `[saveFullContext] userId=${dto.userId} platform=${dto.platform} tweetId=${dto.tweetId}`,
+    );
     const db = await this.mongoService.db();
     await this.ensureDataIndexes();
     const userId = this.requireUserId(dto.userId);
@@ -101,7 +197,16 @@ export class AnalyticsService {
       username: dto.username,
       text: dto.text,
       language: dto.language,
-      rawContextJson: dto.rawContext ?? {},
+      // ponytail: keep only harness metadata — post/media/analysis stored in their own collections
+      rawContextJson: dto.rawContext
+        ? {
+            analysisMode: dto.rawContext.analysisMode,
+            targetLanguage: dto.rawContext.targetLanguage,
+            tone: dto.rawContext.tone,
+            harnessRunId: dto.rawContext.harnessRunId,
+            harnessFinalDecision: dto.rawContext.harnessFinalDecision,
+          }
+        : {},
       extractionConfidence: dto.extractionConfidence ?? 0,
       extractionWarnings: dto.extractionWarnings ?? [],
       lastSeenAt: now,
@@ -261,7 +366,8 @@ export class AnalyticsService {
         intent: this.toStringValue(dto.analysis.intent),
         commentStrategy: this.toStringValue(dto.analysis.commentStrategy),
         warnings: this.toArrayValue(dto.analysis.warnings),
-        rawAiResponse: dto.analysis,
+        // ponytail: drop analysis.raw — suggestions already stored in comment_suggestions
+        rawAiResponse: (({ raw: _, ...rest }) => rest)(dto.analysis),
         createdAt: now,
       });
       this.logger.log(
@@ -555,7 +661,9 @@ export class AnalyticsService {
 
     const analysisIds = suggestions
       .map((suggestion) => suggestion.analysisId)
-      .filter((analysisId): analysisId is ObjectId => analysisId instanceof ObjectId);
+      .filter(
+        (analysisId): analysisId is ObjectId => analysisId instanceof ObjectId,
+      );
     const analyses = analysisIds.length
       ? await db
           .collection('post_analysis')
@@ -1044,7 +1152,9 @@ export class AnalyticsService {
 
     const contextSnippets = recentAnalyses
       .slice(0, 10)
-      .map((a) => [a.topic, a.intent, a.textSummary].filter(Boolean).join(' — '))
+      .map((a) =>
+        [a.topic, a.intent, a.textSummary].filter(Boolean).join(' — '),
+      )
       .filter(Boolean)
       .join('\n');
 
@@ -1056,9 +1166,14 @@ No markdown, no explanation outside the JSON array.`;
 
     const userPrompt = `${topic ? `Topic: ${topic}\n` : ''}${contextSnippets ? `Context from recent analyzed posts the user engages with:\n${contextSnippets}\n` : ''}Generate ${count} posts in ${language}.`;
 
-    const raw = await this.aiReplyPackService.generateText(systemPrompt, userPrompt);
+    const raw = await this.aiReplyPackService.generateText(
+      systemPrompt,
+      userPrompt,
+    );
     const match = raw.match(/\[[\s\S]*\]/);
-    const drafts: string[] = match ? (JSON.parse(match[0]) as string[]) : [raw.trim()];
+    const drafts: string[] = match
+      ? (JSON.parse(match[0]) as string[])
+      : [raw.trim()];
     return { drafts: drafts.slice(0, count) };
   }
 
@@ -1067,36 +1182,76 @@ No markdown, no explanation outside the JSON array.`;
     const since = new Date();
     since.setDate(since.getDate() - days);
 
-    const [actionsByDay, analyzeByDay, toneBreakdown, actionTypeBreakdown] = await Promise.all([
-      db.collection('comment_actions').aggregate<{ _id: string; count: number }>([
-        { $match: { userId, createdAt: { $gte: since } } },
-        { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, count: { $sum: 1 } } },
-        { $sort: { _id: 1 } },
-      ]).toArray(),
+    const [actionsByDay, analyzeByDay, toneBreakdown, actionTypeBreakdown] =
+      await Promise.all([
+        db
+          .collection('comment_actions')
+          .aggregate<{ _id: string; count: number }>([
+            { $match: { userId, createdAt: { $gte: since } } },
+            {
+              $group: {
+                _id: {
+                  $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ])
+          .toArray(),
 
-      db.collection('usage_events').aggregate<{ _id: string; count: number; avgLatencyMs: number }>([
-        { $match: { userId, eventName: 'analyze_succeeded', createdAt: { $gte: since.toISOString() } } },
-        { $group: { _id: { $substr: ['$createdAt', 0, 10] }, count: { $sum: 1 }, avgLatencyMs: { $avg: '$latencyMs' } } },
-        { $sort: { _id: 1 } },
-      ]).toArray(),
+        db
+          .collection('usage_events')
+          .aggregate<{ _id: string; count: number; avgLatencyMs: number }>([
+            {
+              $match: {
+                userId,
+                eventName: 'analyze_succeeded',
+                createdAt: { $gte: since.toISOString() },
+              },
+            },
+            {
+              $group: {
+                _id: { $substr: ['$createdAt', 0, 10] },
+                count: { $sum: 1 },
+                avgLatencyMs: { $avg: '$latencyMs' },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ])
+          .toArray(),
 
-      db.collection('used_comment_memories').aggregate<{ _id: string; count: number }>([
-        { $match: { userId, createdAt: { $gte: since } } },
-        { $group: { _id: '$tone', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]).toArray(),
+        db
+          .collection('used_comment_memories')
+          .aggregate<{ _id: string; count: number }>([
+            { $match: { userId, createdAt: { $gte: since } } },
+            { $group: { _id: '$tone', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+          ])
+          .toArray(),
 
-      db.collection('comment_actions').aggregate<{ _id: string; count: number }>([
-        { $match: { userId, createdAt: { $gte: since } } },
-        { $group: { _id: '$actionType', count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]).toArray(),
+        db
+          .collection('comment_actions')
+          .aggregate<{ _id: string; count: number }>([
+            { $match: { userId, createdAt: { $gte: since } } },
+            { $group: { _id: '$actionType', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+          ])
+          .toArray(),
+      ]);
+
+    const dateSet = new Set([
+      ...actionsByDay.map((r) => r._id),
+      ...analyzeByDay.map((r) => r._id),
     ]);
-
-    const dateSet = new Set([...actionsByDay.map(r => r._id), ...analyzeByDay.map(r => r._id)]);
-    const actionsMap = new Map(actionsByDay.map(r => [r._id, r.count]));
-    const analyzeMap = new Map(analyzeByDay.map(r => [r._id, { count: r.count, avgLatencyMs: r.avgLatencyMs }]));
-    const timeline = [...dateSet].sort().map(date => ({
+    const actionsMap = new Map(actionsByDay.map((r) => [r._id, r.count]));
+    const analyzeMap = new Map(
+      analyzeByDay.map((r) => [
+        r._id,
+        { count: r.count, avgLatencyMs: r.avgLatencyMs },
+      ]),
+    );
+    const timeline = [...dateSet].sort().map((date) => ({
       date,
       actions: actionsMap.get(date) ?? 0,
       analyzed: analyzeMap.get(date)?.count ?? 0,
@@ -1112,10 +1267,19 @@ No markdown, no explanation outside the JSON array.`;
       totals: {
         actions: totalActions,
         analyzed: totalAnalyzed,
-        usageRate: totalAnalyzed > 0 ? Math.round((totalActions / totalAnalyzed) * 100) / 100 : 0,
+        usageRate:
+          totalAnalyzed > 0
+            ? Math.round((totalActions / totalAnalyzed) * 100) / 100
+            : 0,
       },
-      toneBreakdown: toneBreakdown.map(r => ({ tone: r._id ?? 'unknown', count: r.count })),
-      actionTypeBreakdown: actionTypeBreakdown.map(r => ({ actionType: r._id ?? 'unknown', count: r.count })),
+      toneBreakdown: toneBreakdown.map((r) => ({
+        tone: r._id ?? 'unknown',
+        count: r.count,
+      })),
+      actionTypeBreakdown: actionTypeBreakdown.map((r) => ({
+        actionType: r._id ?? 'unknown',
+        count: r.count,
+      })),
     };
   }
 }

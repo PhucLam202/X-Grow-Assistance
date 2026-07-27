@@ -2,6 +2,9 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
+import { RequestTracingInterceptor } from './common/interceptors/request-tracing.interceptor';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { validationExceptionFactory } from './common/validation/validation-error.factory';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -14,11 +17,14 @@ async function bootstrap() {
   );
 
   app.setGlobalPrefix('api/v1');
+  app.useGlobalInterceptors(new RequestTracingInterceptor());
+  app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      exceptionFactory: validationExceptionFactory,
     }),
   );
   app.enableCors({

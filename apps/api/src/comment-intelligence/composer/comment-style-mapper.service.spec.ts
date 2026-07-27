@@ -8,7 +8,11 @@ function makeInput(text: string, language: string) {
 }
 
 function makeDecision(recommendedLanguage = '') {
-  return { recommendedLanguage, recommendedDepth: 'short', zone: 'general' } as any;
+  return {
+    recommendedLanguage,
+    recommendedDepth: 'short',
+    zone: 'general',
+  } as any;
 }
 
 describe('CommentStyleMapperService.toTargetLanguage', () => {
@@ -29,7 +33,10 @@ describe('CommentStyleMapperService.toTargetLanguage', () => {
 
   it('returns en for English football post with accented player name', () => {
     const result = mapper.toTargetLanguage(
-      makeInput('France beat Norway with Dembélé show as both fly to round of 32!', 'vi'),
+      makeInput(
+        'France beat Norway with Dembélé show as both fly to round of 32!',
+        'vi',
+      ),
       makeDecision('vi'),
     );
     expect(result).toBe('en');

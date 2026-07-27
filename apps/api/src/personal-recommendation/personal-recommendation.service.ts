@@ -227,7 +227,9 @@ export class PersonalRecommendationService {
       .findOne({ userId });
     if (!profile) {
       await this.rebuildCommentMemory(userId);
-      profile = await db.collection('comment_memory_profiles').findOne({ userId });
+      profile = await db
+        .collection('comment_memory_profiles')
+        .findOne({ userId });
     }
     const recentUsedComments = await db
       .collection('used_comment_memories')
@@ -471,32 +473,6 @@ export class PersonalRecommendationService {
       .collection('personal_signal_scores')
       .find({ userId })
       .toArray()) as unknown as SignalLike[];
-
-    // ponytail: no perf data yet → derive basic signals from usage history
-    if (signals.length === 0) {
-      const [memories, events] = await Promise.all([
-        db.collection('used_comment_memories').find({ userId }).limit(200).toArray(),
-        db.collection('personal_events').find({ userId }).limit(200).toArray(),
-      ]);
-      const freqToSignals = (type: string, vals: unknown[]) => {
-        const counts = new Map<string, number>();
-        for (const v of vals) {
-          if (v && typeof v === 'string') counts.set(v, (counts.get(v) ?? 0) + 1);
-        }
-        const total = counts.size ? Math.max(...counts.values()) : 1;
-        return [...counts.entries()].map(([key, count]) => ({
-          signalType: type,
-          signalKey: key,
-          score: Math.min(100, Math.round((count / total) * 80)),
-        }));
-      };
-      (signals as SignalLike[]).push(
-        ...freqToSignals('language', memories.map((m) => m.language)),
-        ...freqToSignals('tone', memories.map((m) => m.tone)),
-        ...freqToSignals('niche', events.map((e) => e.niche)),
-        ...freqToSignals('account', events.map((e) => e.username)),
-      );
-    }
 
     const byType = (signalType: SignalType) =>
       signals

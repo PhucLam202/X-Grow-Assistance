@@ -1,40 +1,24 @@
+/**
+ * @deprecated Nguồn chân lý cho tone/niche/language đã chuyển sang
+ * `src/modules/generations/types/style.types.ts` và `niche.types.ts`.
+ * File này chỉ re-export lại trong giai đoạn transition để không phá các import
+ * cũ (`ai.types.ts`, `vision-analyze.service.ts`, `comment-style-mapper.service.ts`, ...).
+ * Import mới phải trỏ thẳng vào `modules/generations/types/`.
+ */
 import { DetectedLanguage } from '../../common/language/language.types';
 
-export const COMMENT_TONES = [
-  'short_native',
-  'casual_supportive',
-  'question_based',
-  'insightful',
-  'funny_light',
-  'anime_fan',
-  'crypto_casual',
-  'football_fan',
-  'congratulation',
-] as const;
+export {
+  COMMENT_NICHES,
+  COMMENT_TONES,
+  TARGET_COMMENT_LANGUAGES,
+} from '../../modules/generations/types/style.types';
 
-export const COMMENT_NICHES = [
-  'auto',
-  'anime_manga',
-  'crypto',
-  'football',
-  'tech',
-  'business',
-  'gaming',
-  'music',
-  'news',
-  'general',
-] as const;
+export type {
+  CommentNiche,
+  CommentTone,
+  TargetCommentLanguage,
+} from '../../modules/generations/types/style.types';
 
-export const TARGET_COMMENT_LANGUAGES = [
-  'same_as_original',
-  'ja',
-  'en',
-  'vi',
-] as const;
-
-export type CommentTone = (typeof COMMENT_TONES)[number];
-export type CommentNiche = (typeof COMMENT_NICHES)[number];
-export type TargetCommentLanguage = (typeof TARGET_COMMENT_LANGUAGES)[number];
 export type RiskLevel = 'low' | 'medium' | 'high';
 
 export type ReplyCandidateScore = {

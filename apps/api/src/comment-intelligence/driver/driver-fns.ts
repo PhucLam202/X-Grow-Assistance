@@ -9,19 +9,36 @@ export function classifyZone(input: DriverInput): CommentZone {
   const text = allText(input);
   if (/war|death|killed|racis|religion|politic|nsfw|suicide|scam/i.test(text))
     return 'risky_topic';
-  if (/anime|manga|one piece|naruto|jujutsu|vtuber|アニメ|漫画|マンガ|推し/i.test(text))
-    return /meme|😂|🤣|ｗｗ|笑|lol|lmao/i.test(text) || (input.media?.length ?? 0) > 0
+  if (
+    /anime|manga|one piece|naruto|jujutsu|vtuber|アニメ|漫画|マンガ|推し/i.test(
+      text,
+    )
+  )
+    return /meme|😂|🤣|ｗｗ|笑|lol|lmao/i.test(text) ||
+      (input.media?.length ?? 0) > 0
       ? 'anime_meme'
       : 'general';
-  if (/congrats|congratulations|shipped|launched|milestone|won|passed|achieved/i.test(text))
+  if (
+    /congrats|congratulations|shipped|launched|milestone|won|passed|achieved/i.test(
+      text,
+    )
+  )
     return 'achievement_congrats';
   if (/sad|sorry|tired|burnout|heartbroken|miss you|つらい|悲しい/i.test(text))
     return 'emotional_support';
-  if (/typescript|react|api|database|ai|llm|openai|claude|code|bug|deploy/i.test(text))
+  if (
+    /typescript|react|api|database|ai|llm|openai|claude|code|bug|deploy/i.test(
+      text,
+    )
+  )
     return 'technical_insight';
   if (/breaking|news|announced|report|update|速報/i.test(text))
     return 'news_reaction';
-  if (/hot take|unpopular opinion|debate|wrong|agree|disagree|controversial/i.test(text))
+  if (
+    /hot take|unpopular opinion|debate|wrong|agree|disagree|controversial/i.test(
+      text,
+    )
+  )
     return 'debate_hot_take';
   if (mainText(input).length < 30 && !input.quotedPost && !input.parentPost)
     return 'low_context';
@@ -48,7 +65,11 @@ export function recommendLanguage(
 ): string {
   if (input.mainPost.language && input.mainPost.language !== 'unknown')
     return input.mainPost.language;
-  const text = [input.mainPost.text, input.quotedPost?.text, input.parentPost?.text]
+  const text = [
+    input.mainPost.text,
+    input.quotedPost?.text,
+    input.parentPost?.text,
+  ]
     .filter(Boolean)
     .join(' ');
   return languageDetector.detect(text);
@@ -71,7 +92,10 @@ export function recommendTone(zone: CommentZone): string {
   return ZONE_TONES[zone];
 }
 
-export function recommendDepth(input: DriverInput, zone: CommentZone): CommentDepth {
+export function recommendDepth(
+  input: DriverInput,
+  zone: CommentZone,
+): CommentDepth {
   if (zone === 'technical_insight') return 'deep';
   if (zone === 'debate_hot_take' || zone === 'news_reaction') return 'medium';
   if (zone === 'low_context') return 'short';
@@ -88,7 +112,10 @@ export function decideSafety(
   if (zone === 'risky_topic')
     return {
       shouldComment: false,
-      avoid: [...avoid, 'Do not engage with unsafe, hateful, or highly political content'],
+      avoid: [
+        ...avoid,
+        'Do not engage with unsafe, hateful, or highly political content',
+      ],
     };
   if (input.extraction.confidence < 0.35)
     return {
@@ -108,7 +135,9 @@ export function writeStrategy(input: {
 }): string {
   const sources = input.driverInput.contextState?.expansionSources ?? [];
   const contextHint =
-    sources.length > 0 ? `Use expanded context from: ${sources.join(', ')}.` : undefined;
+    sources.length > 0
+      ? `Use expanded context from: ${sources.join(', ')}.`
+      : undefined;
   return [
     `Write a ${input.depth} ${input.language} reply for ${input.zone}.`,
     `Intent: ${input.intent}. Tone: ${input.tone}.`,

@@ -38,17 +38,122 @@ async function apiFetch(path: string, init: ApiRequestInit = {}): Promise<Respon
   return response;
 }
 
-async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+/**
+ * The API's `GlobalExceptionFilter` reads `HttpException.message`, which Nest
+ * flattens to "Bad Request Exception" for ValidationPipe failures — the
+ * per-field codes (INVALID_NICHE, INVALID_TONE, …) never reach us. So the code
+ * is the only actionable signal on a 400, and we translate it here.
+ */
+const ERROR_CODE_MESSAGES: Record<string, string> = {
+  VALIDATION_FAILED: "The request was rejected. Check your generation settings.",
+  INVALID_POST_CONTEXT: "This post has no text and no image to work from.",
+  INVALID_NICHE: "That niche is not supported. Pick another one in settings.",
+  INVALID_TONE: "That tone is not supported. Pick another one in settings.",
+  INVALID_INTENT: "That intent is not supported. Pick another one in settings.",
+  INVALID_REPLY_COUNT: "Reply count must be 3 or 4.",
+  BAD_REQUEST: "The request was rejected. Check your generation settings.",
+  AUTH_REQUIRED: "Your session expired. Please log in again.",
+  FORBIDDEN: "You do not have access to this action.",
+  RATE_LIMITED: "Too many requests. Wait a moment and try again.",
+  QUOTA_EXCEEDED: "You have reached your generation quota.",
+  IMAGE_FETCH_FAILED: "Could not download the post image.",
+  IMAGE_TOO_LARGE: "The post image is too large to analyze.",
+  UNSUPPORTED_IMAGE_TYPE: "That image format is not supported.",
+  VISION_PROVIDER_UNAVAILABLE: "Image analysis is unavailable right now.",
+  AI_PROVIDER_TIMEOUT: "The AI provider timed out. Try again.",
+  AI_PROVIDER_RATE_LIMITED: "The AI provider is rate limiting us. Try again shortly.",
+  AI_PROVIDER_UNAVAILABLE: "The AI provider is unavailable right now.",
+  AI_AUTHENTICATION_FAILED: "The server could not authenticate with the AI provider.",
+  AI_INVALID_OUTPUT: "The AI returned an unusable response. Try again.",
+  AI_OUTPUT_REPAIR_FAILED: "The AI returned an unusable response. Try again.",
+  GENERATION_FAILED: "Generation failed. Try again.",
+  INTERNAL_ERROR: "Something went wrong on the server.",
+};
+
+export type ApiErrorEnvelope = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  requestId: string;
+};
+
+/** Thrown for every non-OK response so callers can branch on `code`. */
+export class ApiError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly requestId?: string;
+  readonly status: number;
+
+  constructor(
+    message: string,
+    options: { code: string; retryable: boolean; requestId?: string; status: number },
+  ) {
+    super(message);
+    this.name = "ApiError";
+    this.code = options.code;
+    this.retryable = options.retryable;
+    this.requestId = options.requestId;
+    this.status = options.status;
+  }
+}
+
+async function toApiError(response: Response, fallback: string): Promise<ApiError> {
   try {
-    const body = (await response.json()) as { message?: string | string[]; error?: string };
-    if (Array.isArray(body.message) && body.message.length > 0) return body.message.join("; ");
-    if (typeof body.message === "string" && body.message.trim()) return body.message;
-    if (typeof body.error === "string" && body.error.trim()) return body.error;
+    const body = (await response.json()) as {
+      error?: ApiErrorEnvelope | string;
+      message?: string | string[];
+    };
+
+    // Current contract: { error: { code, message, retryable, requestId } }
+    if (body.error && typeof body.error === "object") {
+      const envelope = body.error;
+      const mapped = ERROR_CODE_MESSAGES[envelope.code];
+      const raw = typeof envelope.message === "string" ? envelope.message.trim() : "";
+      // Nest's flattened "…Exception" text is noise; prefer the mapped copy.
+      const useRaw = raw && !/Exception$/.test(raw);
+      return new ApiError(mapped ?? (useRaw ? raw : fallback), {
+        code: envelope.code,
+        retryable: Boolean(envelope.retryable),
+        requestId: envelope.requestId,
+        status: response.status,
+      });
+    }
+
+    // Legacy contract, still emitted by routes outside the global filter.
+    if (Array.isArray(body.message) && body.message.length > 0) {
+      return new ApiError(body.message.join("; "), {
+        code: "VALIDATION_FAILED",
+        retryable: false,
+        status: response.status,
+      });
+    }
+    if (typeof body.message === "string" && body.message.trim()) {
+      return new ApiError(body.message, {
+        code: "UNKNOWN",
+        retryable: false,
+        status: response.status,
+      });
+    }
+    if (typeof body.error === "string" && body.error.trim()) {
+      return new ApiError(body.error, {
+        code: "UNKNOWN",
+        retryable: false,
+        status: response.status,
+      });
+    }
   } catch {
     // Some endpoints may return an empty or non-JSON error response.
   }
 
-  return fallback;
+  return new ApiError(fallback, {
+    code: "UNKNOWN",
+    retryable: false,
+    status: response.status,
+  });
+}
+
+async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
+  return (await toApiError(response, fallback)).message;
 }
 
 export async function login(request: {
@@ -311,4 +416,28 @@ export async function scorePost(request: {
   }
 
   return response.json() as Promise<OpportunityPostScoreResponse>;
+}
+
+export async function generateReplyPack(
+  payload: import("./types").CreateReplyPackPayload,
+  options: { idempotencyKey?: string } = {},
+): Promise<import("./types").ReplyPackApiResponse> {
+  const response = await apiFetch(`/reply-packs`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      // Lets the API de-duplicate a retried generation instead of billing twice.
+      ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw await toApiError(
+      response,
+      `Generate reply pack failed with status ${response.status}`,
+    );
+  }
+
+  return response.json() as Promise<import("./types").ReplyPackApiResponse>;
 }

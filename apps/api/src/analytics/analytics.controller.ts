@@ -26,14 +26,26 @@ export class AnalyticsController {
 
   @UseGuards(AuthGuard)
   @Post('full-context')
-  saveFullContext(@Body() dto: SaveFullContextDto, @CurrentUser() user: AuthUser) {
-    return this.analyticsService.saveFullContext({ ...dto, userId: user.userId });
+  saveFullContext(
+    @Body() dto: SaveFullContextDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.analyticsService.saveFullContext({
+      ...dto,
+      userId: user.userId,
+    });
   }
 
   @UseGuards(AuthGuard)
   @Post('comment-actions')
-  logCommentAction(@Body() dto: LogCommentActionDto, @CurrentUser() user: AuthUser) {
-    return this.analyticsService.logCommentAction({ ...dto, userId: user.userId });
+  logCommentAction(
+    @Body() dto: LogCommentActionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.analyticsService.logCommentAction({
+      ...dto,
+      userId: user.userId,
+    });
   }
 
   @UseGuards(AuthGuard)
@@ -50,7 +62,10 @@ export class AnalyticsController {
 
   @UseGuards(AuthGuard)
   @Get('comment-overview')
-  getCommentOverview(@CurrentUser() user: AuthUser, @Query('userId') _userId?: string) {
+  getCommentOverview(
+    @CurrentUser() user: AuthUser,
+    @Query('userId') _userId?: string,
+  ) {
     return this.analyticsService.getCommentOverview(user.userId);
   }
 
@@ -80,7 +95,10 @@ export class AnalyticsController {
   @UseGuards(AuthGuard)
   @Get('growth-report')
   getGrowthReport(@CurrentUser() user: AuthUser, @Query('days') days?: string) {
-    return this.analyticsService.getGrowthReport(user.userId, Math.min(Number(days ?? 30), 90));
+    return this.analyticsService.getGrowthReport(
+      user.userId,
+      Math.min(Number(days ?? 30), 90),
+    );
   }
 
   @UseGuards(AuthGuard)
@@ -89,6 +107,11 @@ export class AnalyticsController {
     @Body() body: { topic?: string; language: string; count?: number },
     @CurrentUser() user: AuthUser,
   ) {
-    return this.analyticsService.draftPost(user.userId, body.topic, body.language, body.count ?? 3);
+    return this.analyticsService.draftPost(
+      user.userId,
+      body.topic,
+      body.language,
+      body.count ?? 3,
+    );
   }
 }
