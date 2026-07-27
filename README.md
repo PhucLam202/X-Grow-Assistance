@@ -9,6 +9,12 @@
 
 ---
 
+## 📍 Quick Navigation
+
+[✨ Features](#features) • [🌐 How It Works](#how-it-works-visual-guide) • [🏗️ Architecture](#architecture) • [📂 Project Structure](#project-structure) • [🚀 Quick Start](#quick-start) • [⚙️ Configuration](#configuration) • [📜 Scripts](#scripts) • [🔒 Safety & Privacy](#safety--privacy) • [💻 Tech Stack](#tech-stack)
+
+---
+
 ## Features
 
 | Feature | Description |
@@ -23,6 +29,32 @@
 | **Authentication** | Secure email/password registration & login with persistent or browser-session temporary auth (Remember Login) |
 | **Safe Copy Flow** | Copy-only, no auto-paste, no DOM injection, no auto-send |
 | **i18n** | Vietnamese + English interface (defaults to English, fully customizable) |
+
+---
+
+## 🌐 How It Works (Visual Guide)
+
+Follow these steps to authenticate, select a post, generate comment suggestions, and manage your history and settings in the Chrome Extension Sidepanel:
+
+### 1. Authenticate (Register or Login)
+Toggle between **Login** and **Create account** tabs or click the helper link under the form. If you want the extension to remember your login session persistently, make sure **Remember login** is checked (if unchecked, closing the browser will log you out).
+![01_auth_screen](docs/images/01_auth_screen.png)
+
+### 2. Select & Detect X Post
+Open [x.com](https://x.com) on any post. Click **Detect current X post** in the Sidepanel. The extension will fetch the post content (including images, if any), analyze the opportunity score, and show a breakdown.
+![02_detect_post](docs/images/02_detect_post.png)
+
+### 3. Generate & Copy AI Replies
+Select your desired niche, comment language, tone, and click **Analyze & generate**. The Sidepanel will list 3-4 suggestions. Click **Copy** next to the reply you like, and paste it manually into the X reply box.
+![03_copy_comment](docs/images/03_copy_comment.png)
+
+### 4. Review Comment History
+Access the **History** tab to see your generated comment history, showing the original post, generated comments, score, and copy tracking.
+![04_history](docs/images/04_history.png)
+
+### 5. Customize Settings
+Open the **Settings** tab to change emoji level, default reply language, explanation language, replies per generation, image analysis modes, or log out of your session.
+![05_settings](docs/images/05_settings.png)
 
 ---
 
