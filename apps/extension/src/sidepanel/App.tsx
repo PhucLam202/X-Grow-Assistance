@@ -331,6 +331,7 @@ export function App() {
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [authMessageType, setAuthMessageType] = useState<AuthMessageType>("info");
+  const [rememberMe, setRememberMe] = useState(true);
 
   // ── Navigation ──────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("analyze");
@@ -423,18 +424,18 @@ export function App() {
   async function handleAuthSubmit() {
     const email = loginEmail.trim() || undefined;
     const phone = authMode === "create" ? loginPhone.trim() || undefined : undefined;
-    if (!email && !phone) { setAuthMessageType("error"); setAuthMessage("Enter an email or phone number."); return; }
-    if (loginPassword.length < 8) { setAuthMessageType("error"); setAuthMessage("Password must be at least 8 characters."); return; }
+    if (!email && !phone) { setAuthMessageType("error"); setAuthMessage(t("auth.enterEmailOrPhone")); return; }
+    if (loginPassword.length < 8) { setAuthMessageType("error"); setAuthMessage(t("auth.passwordLength")); return; }
     setIsAuthLoading(true);
     setAuthMessage(null);
     try {
       const session = authMode === "create"
         ? await register({ email, phone, name: loginName.trim() || undefined, password: loginPassword })
         : await login({ email, phone, password: loginPassword });
-      await setAuthSession(session);
+      await setAuthSession(session, rememberMe);
       setAuthSessionState(session);
       setAuthMessageType("success");
-      setAuthMessage(authMode === "create" ? "Account created." : "Logged in.");
+      setAuthMessage(authMode === "create" ? t("auth.accountCreated") : t("auth.loggedIn"));
     } catch (err) {
       setAuthMessageType("error");
       setAuthMessage(err instanceof Error ? err.message : "Login failed.");
@@ -1020,12 +1021,12 @@ export function App() {
       <main className="shell authShell">
         <section className="hero authHero">
           <p className="eyebrow">X Comment Assistant</p>
-          <h1>Growth Decision Engine</h1>
-          <p className="heroText">Login to sync comment history and generate AI-powered replies.</p>
+          <h1>{t("auth.heroSubtitle")}</h1>
+          <p className="heroText">{t("auth.heroText")}</p>
         </section>
 
         <section className="safetyBanner">
-          This extension never sends replies automatically and never touches the X reply box.
+          {t("auth.safetyBanner")}
         </section>
 
         <section className="panel authPanel">
@@ -1033,37 +1034,69 @@ export function App() {
             <div className="authTabs" role="tablist" aria-label="Account mode">
               <button className="authTab" type="button" data-selected={authMode === "login"}
                 onClick={() => { setAuthMode("login"); setLoginPhone(""); setLoginName(""); setAuthMessage(null); }}>
-                Login
+                {t("auth.loginTab")}
               </button>
               <button className="authTab" type="button" data-selected={authMode === "create"}
                 onClick={() => { setAuthMode("create"); setAuthMessage(null); }}>
-                Create account
+                {t("auth.registerTab")}
               </button>
             </div>
-            <button className="xOAuthButton" type="button" disabled={isAuthLoading} onClick={handleXOAuth}>
-              Continue with X
-            </button>
-            <div className="authDivider"><span>or use email</span></div>
             <div className="authForm">
-              <label className="field">Email
+              <label className="field">{t("auth.emailLabel")}
                 <input type="email" value={loginEmail} placeholder="you@example.com" onChange={(e) => setLoginEmail(e.target.value)} />
               </label>
               {authMode === "create" ? (
                 <>
-                  <label className="field">Phone optional
+                  <label className="field">{t("auth.phoneLabel")}
                     <input type="tel" value={loginPhone} placeholder="+84901234567" onChange={(e) => setLoginPhone(e.target.value)} />
                   </label>
-                  <label className="field">Display name optional
+                  <label className="field">{t("auth.nameLabel")}
                     <input type="text" value={loginName} placeholder="Display name" onChange={(e) => setLoginName(e.target.value)} />
                   </label>
                 </>
               ) : null}
-              <label className="field">Password
-                <input type="password" value={loginPassword} placeholder="At least 8 characters" onChange={(e) => setLoginPassword(e.target.value)} />
+              <label className="field">{t("auth.passwordLabel")}
+                <input type="password" value={loginPassword} placeholder={t("auth.passwordPlaceholder")} onChange={(e) => setLoginPassword(e.target.value)} />
               </label>
+              
+              <label className="rememberMeContainer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
+                <span>{t("auth.rememberMe")}</span>
+              </label>
+
               <button className="primaryButton" type="button" disabled={isAuthLoading} onClick={() => void handleAuthSubmit()}>
-                {isAuthLoading ? "Checking..." : authMode === "create" ? "Create account" : "Login"}
+                {isAuthLoading ? t("auth.checking") : authMode === "create" ? t("auth.registerBtn") : t("auth.loginBtn")}
               </button>
+
+              {authMode === "login" ? (
+                <button
+                  className="authToggleLink"
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("create");
+                    setAuthMessage(null);
+                  }}
+                >
+                  {t("auth.noAccount")}
+                </button>
+              ) : (
+                <button
+                  className="authToggleLink"
+                  type="button"
+                  onClick={() => {
+                    setAuthMode("login");
+                    setLoginPhone("");
+                    setLoginName("");
+                    setAuthMessage(null);
+                  }}
+                >
+                  {t("auth.hasAccount")}
+                </button>
+              )}
             </div>
           </div>
           {authMessage ? (

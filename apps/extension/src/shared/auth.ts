@@ -1,4 +1,5 @@
 const AUTH_SESSION_STORAGE_KEY = "x_comment_assistant_auth_session_v1";
+const REMEMBER_ME_STORAGE_KEY = "x_comment_assistant_remember_me_v1";
 
 export type AuthUser = {
   userId: string;
@@ -14,9 +15,9 @@ export type AuthSession = {
 
 // ponytail: typed for MV3 Promise API; @types/chrome not installed in this package
 type ChromeStorageLocal = {
-  get(key: string): Promise<Record<string, unknown>>;
+  get(keys: string | string[]): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
-  remove(key: string): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
 };
 
 function getChromeStorage(): ChromeStorageLocal | undefined {
@@ -34,10 +35,16 @@ export async function getAuthSession(): Promise<AuthSession | null> {
   return isAuthSession(items[AUTH_SESSION_STORAGE_KEY]) ? items[AUTH_SESSION_STORAGE_KEY] : null;
 }
 
-export async function setAuthSession(session: AuthSession): Promise<void> {
-  await getChromeStorage()?.set({ [AUTH_SESSION_STORAGE_KEY]: session });
+export async function setAuthSession(session: AuthSession, rememberMe: boolean = true): Promise<void> {
+  await getChromeStorage()?.set({
+    [AUTH_SESSION_STORAGE_KEY]: session,
+    [REMEMBER_ME_STORAGE_KEY]: rememberMe,
+  });
 }
 
 export async function clearAuthSession(): Promise<void> {
-  await getChromeStorage()?.remove(AUTH_SESSION_STORAGE_KEY);
+  const storage = getChromeStorage();
+  if (storage) {
+    await storage.remove([AUTH_SESSION_STORAGE_KEY, REMEMBER_ME_STORAGE_KEY]);
+  }
 }

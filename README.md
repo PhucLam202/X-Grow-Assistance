@@ -20,8 +20,9 @@
 | **Opportunity Scoring** | Scores any post on 9 dimensions: freshness, engagement, reply surface, spam risk, … |
 | **Feed Intelligence** | Scan visible feed, batch-score opportunities, pick the best post to engage |
 | **Comment History** | Saved generations with copy tracking and performance feedback |
+| **Authentication** | Secure email/password registration & login with persistent or browser-session temporary auth (Remember Login) |
 | **Safe Copy Flow** | Copy-only, no auto-paste, no DOM injection, no auto-send |
-| **i18n** | Vietnamese + English interface |
+| **i18n** | Vietnamese + English interface (defaults to English, fully customizable) |
 
 ---
 
@@ -104,36 +105,94 @@ x-comment-assistant/
 
 - Node.js 18+
 - pnpm 9+
-- MongoDB 7+ (for analytics)
-- Chrome (for extension)
+- MongoDB 7+ (for analytics) — *optional, only if you need comment history*
+- Chrome / Edge / Brave (for extension)
 
 ### 2. Install
 
 ```bash
-git clone <repo>
+git clone <repo-url>
 cd x-comment-assistant
 pnpm install
 ```
 
-### 3. Configure
+### 3. Configure API
 
 ```bash
 cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env — add at least one AI provider key
 ```
 
-### 4. Run API
+Edit `apps/api/.env` and set at least one AI provider key:
+
+```env
+TEXT_AI_PROVIDER=deepseek
+DEEPSEEK_API_KEY=sk-your-key-here
+
+# Optional: for image analysis
+VISION_AI_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-your-key-here
+```
+
+Also set JWT secret for auth:
+
+```env
+JWT_SECRET=a-long-random-string
+```
+
+### 4. Start Backend API
 
 ```bash
-pnpm dev:api
+cd apps/api
+pnpm run start:dev
 # → http://127.0.0.1:3001/api/v1
+# → Health check: curl http://127.0.0.1:3001/api/v1/health
 ```
 
-### 5. Build + Load Extension
+> Keep the API running in a terminal tab. The extension needs it to generate replies.
+
+### 5. Build Chrome Extension
+
+Open a **new terminal tab** (keep API running), then:
 
 ```bash
+# From project root
+cd x-comment-assistant
 pnpm build:extension
-# → Load apps/extension/dist in chrome://extensions
+```
+
+This creates the `apps/extension/dist` folder.
+
+### 6. Load Extension into Chrome
+
+1. Open Chrome and go to `chrome://extensions`
+2. Enable **Developer mode** (toggle top-right)
+3. Click **Load unpacked**
+4. Select the folder: `x-comment-assistant/apps/extension/dist`
+5. The extension icon should appear in the toolbar
+
+> ☝️ Repeat steps 3-4 after every `pnpm build:extension` if you modify the code.
+### 7. Use the Extension
+
+1. Go to [x.com](https://x.com) and open any post
+2. Click the extension icon in the toolbar → side panel opens
+3. Access authentication:
+   - Toggle between **Login** or **Create account** using the tabs or the quick text link under the form.
+   - Enter your email and password (minimum 8 characters).
+   - Use the **Remember login** checkbox: if checked, you will stay logged in permanently; if unchecked, closing the browser will automatically sign you out.
+4. Once logged in, click **Detect current X post**
+5. The post appears in the side panel with an opportunity score
+6. Choose your niche, tone, length, etc. (you can change the interface and response language in the settings menu)
+7. Click **Generate replies**
+8. Wait ~10-20s for AI to finish
+9. Copy a suggestion → manually paste it into the X reply box
+
+### Run on the same machine
+
+```
+┌─ Terminal 1 ──┐    ┌─ Terminal 2 ──┐    ┌─ Chrome ────────────┐
+│ pnpm start:dev │    │ pnpm build    │    │ chrome://extensions │
+│ (API :3001)    │    │ (extension)   │    │ Load unpacked dist  │
+└────────────────┘    └────────────────┘    └─────────────────────┘
 ```
 
 ---

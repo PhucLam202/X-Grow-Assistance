@@ -8,7 +8,7 @@ export type UiLanguage = 'vi' | 'en';
 
 function getInitialLanguage(): UiLanguage {
   const savedLanguage = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
-  return savedLanguage === 'en' ? 'en' : 'vi';
+  return savedLanguage === 'vi' ? 'vi' : 'en';
 }
 
 void i18n.use(initReactI18next).init({
@@ -17,7 +17,7 @@ void i18n.use(initReactI18next).init({
     vi: { translation: vi },
   },
   lng: getInitialLanguage(),
-  fallbackLng: 'vi',
+  fallbackLng: 'en',
   interpolation: {
     escapeValue: false,
   },

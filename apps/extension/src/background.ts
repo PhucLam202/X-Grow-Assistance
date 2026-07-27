@@ -13,6 +13,9 @@ type ChromeRuntime = {
     onInstalled?: {
       addListener(callback: () => void): void;
     };
+    onStartup?: {
+      addListener(callback: () => void): void;
+    };
     onMessage?: {
       addListener(
         callback: (
@@ -25,8 +28,9 @@ type ChromeRuntime = {
   };
   storage?: {
     local?: {
-      get(key: string, callback: (items: Record<string, unknown>) => void): void;
+      get(keys: string | string[], callback: (items: Record<string, unknown>) => void): void;
       set(items: Record<string, unknown>): void;
+      remove(keys: string | string[], callback?: () => void): void;
     };
   };
   sidePanel?: {
@@ -108,3 +112,14 @@ chrome.runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
     return true; // keep message channel open for async response
   }
 });
+
+chrome.runtime?.onStartup?.addListener(() => {
+  const AUTH_SESSION_STORAGE_KEY = 'x_comment_assistant_auth_session_v1';
+  const REMEMBER_ME_STORAGE_KEY = 'x_comment_assistant_remember_me_v1';
+  chrome.storage?.local?.get([REMEMBER_ME_STORAGE_KEY, AUTH_SESSION_STORAGE_KEY], (items) => {
+    if (items[REMEMBER_ME_STORAGE_KEY] === false) {
+      chrome.storage?.local?.remove([AUTH_SESSION_STORAGE_KEY, REMEMBER_ME_STORAGE_KEY]);
+    }
+  });
+});
+
